@@ -14,6 +14,8 @@
     .tv-link:hover { text-decoration: underline; color: #00e5a0 !important; }
     .price-editable { cursor: pointer; border-bottom: 1px dashed #334; }
     .price-editable:hover { border-bottom-color: #f0c040; color: #f0c040 !important; }
+    .wcard { transition: border-color 0.2s, transform 0.15s; }
+    .wcard:hover { border-color: #00e5a044 !important; transform: translateY(-1px); }
   </style>
 </head>
 <body>
@@ -36,10 +38,17 @@ async function fetchYahoo(ticker, interval, range) {
   return { closes, lastPrice, dayChange };
 }
 
+async function fetchInfo(ticker) {
+  try {
+    const res = await fetch(`/api/info?ticker=${ticker}`, { signal: AbortSignal.timeout(8000) });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch { return null; }
+}
+
 async function fetchUSDCLP() {
   try {
-    const res = await fetch(`/api/quote?ticker=USDCLP%3DX&interval=1d&range=5d`,
-      { signal: AbortSignal.timeout(8000) });
+    const res = await fetch(`/api/quote?ticker=USDCLP%3DX&interval=1d&range=5d`, { signal: AbortSignal.timeout(8000) });
     if (!res.ok) return null;
     const data = await res.json();
     const result = data?.chart?.result?.[0];
@@ -83,7 +92,6 @@ const fmtCLP = (n, dec = 2) => n == null ? "—" : `$${n.toLocaleString("es-CL",
 const fmtPct = (n) => n == null ? "—" : `${n > 0 ? "+" : ""}${fmt(n)}%`;
 const clr = (n) => n == null ? "#8899aa" : n >= 0 ? "#00e5a0" : "#ff4d6d";
 const rsiColor = (r) => r == null ? "#8899aa" : r < 35 ? "#00e5a0" : r > 65 ? "#ff4d6d" : "#f0c040";
-const rsiLabel = (r) => r == null ? "" : r < 35 ? "SOBREVENDIDO" : r > 65 ? "SOBRECOMPRADO" : "NEUTRAL";
 const ff = "'IBM Plex Mono','Courier New',monospace";
 const openTV = (ticker) => window.open(`https://www.tradingview.com/chart/?symbol=${ticker}`, "tv_main_window");
 
@@ -109,11 +117,51 @@ function NoteModal({ ticker, initialNote, onSave, onClose }) {
       <div style={{ background: "#0c1624", border: "1px solid #1e2d40", borderRadius: 10, padding: 24, width: 420, maxWidth: "95vw" }} onClick={e => e.stopPropagation()}>
         <div style={{ fontWeight: 700, marginBottom: 12, letterSpacing: 2, color: "#f0c040", fontSize: 12 }}>📝 NOTA — {ticker}</div>
         <textarea value={note} onChange={e => setNote(e.target.value)} autoFocus
-          placeholder="Escribí tus notas sobre esta posición..."
+          placeholder="Escribí tus notas..."
           style={{ width: "100%", height: 160, background: "#060b10", border: "1px solid #1e2d40", borderRadius: 6, color: "#c8d6e5", fontSize: 12, fontFamily: ff, padding: 12, boxSizing: "border-box", resize: "none", lineHeight: 1.6 }} />
         <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
           <button style={{ flex: 1, padding: "9px", background: "#f0c04018", color: "#f0c040", border: "1px solid #f0c04044", borderRadius: 4, cursor: "pointer", fontFamily: ff, fontWeight: 700, fontSize: 11 }} onClick={() => onSave(note)}>GUARDAR</button>
-          <button style={{ flex: 1, padding: "9px", background: "#44518", color: "#8899aa", border: "1px solid #33344", borderRadius: 4, cursor: "pointer", fontFamily: ff, fontWeight: 700, fontSize: 11 }} onClick={onClose}>CANCELAR</button>
+          <button style={{ flex: 1, padding: "9px", background: "transparent", color: "#8899aa", border: "1px solid #1e2d40", borderRadius: 4, cursor: "pointer", fontFamily: ff, fontWeight: 700, fontSize: 11 }} onClick={onClose}>CANCELAR</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function EditTxModal({ tx, onSave, onClose }) {
+  const [form, setForm] = useState({ ...tx });
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "#000c", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200 }} onClick={onClose}>
+      <div style={{ background: "#0c1624", border: "1px solid #1e2d40", borderRadius: 10, padding: 24, width: 420, maxWidth: "95vw" }} onClick={e => e.stopPropagation()}>
+        <div style={{ fontWeight: 700, marginBottom: 16, letterSpacing: 2, color: "#5b9cf6", fontSize: 12 }}>✏️ EDITAR TRANSACCIÓN</div>
+        {[{ label: "TICKER", key: "ticker" }, { label: "FECHA", key: "date", type: "date" }, { label: "CANTIDAD", key: "qty", type: "number" }, { label: "PRECIO", key: "price", type: "number" }].map(f => (
+          <div key={f.key} style={{ marginBottom: 10 }}>
+            <div style={{ fontSize: 10, letterSpacing: 2, color: "#445", marginBottom: 4 }}>{f.label}</div>
+            <input style={{ background: "#060b10", border: "1px solid #1e2d40", borderRadius: 4, color: "#c8d6e5", padding: "8px 12px", fontSize: 12, fontFamily: ff, width: "100%", boxSizing: "border-box" }}
+              value={form[f.key]} type={f.type || "text"} onChange={e => setForm(p => ({ ...p, [f.key]: e.target.value }))} />
+          </div>
+        ))}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 9, marginBottom: 16 }}>
+          <div>
+            <div style={{ fontSize: 10, letterSpacing: 2, color: "#445", marginBottom: 4 }}>ACCIÓN</div>
+            <select style={{ background: "#060b10", border: "1px solid #1e2d40", borderRadius: 4, color: "#c8d6e5", padding: "8px 12px", fontSize: 12, fontFamily: ff, width: "100%", boxSizing: "border-box" }}
+              value={form.action} onChange={e => setForm(p => ({ ...p, action: e.target.value }))}>
+              <option value="BUY">BUY</option><option value="SELL">SELL</option>
+            </select>
+          </div>
+          <div>
+            <div style={{ fontSize: 10, letterSpacing: 2, color: "#445", marginBottom: 4 }}>BOLSA</div>
+            <select style={{ background: "#060b10", border: "1px solid #1e2d40", borderRadius: 4, color: "#c8d6e5", padding: "8px 12px", fontSize: 12, fontFamily: ff, width: "100%", boxSizing: "border-box" }}
+              value={form.currency} onChange={e => setForm(p => ({ ...p, currency: e.target.value }))}>
+              <option value="USD">NYSE (USD)</option><option value="CLP">BSC (CLP)</option>
+            </select>
+          </div>
+        </div>
+        <div style={{ display: "flex", gap: 9 }}>
+          <button style={{ flex: 1, padding: "10px", background: "#5b9cf618", color: "#5b9cf6", border: "1px solid #5b9cf644", borderRadius: 4, cursor: "pointer", fontFamily: ff, fontWeight: 700, fontSize: 11 }}
+            onClick={() => onSave({ ...form, qty: +form.qty, price: +form.price })}>GUARDAR</button>
+          <button style={{ flex: 1, padding: "10px", background: "transparent", color: "#8899aa", border: "1px solid #1e2d40", borderRadius: 4, cursor: "pointer", fontFamily: ff, fontWeight: 700, fontSize: 11 }}
+            onClick={onClose}>CANCELAR</button>
         </div>
       </div>
     </div>
@@ -122,7 +170,7 @@ function NoteModal({ ticker, initialNote, onSave, onClose }) {
 
 function App() {
   const [tab, setTab] = useState("portfolio");
-  const [marketFilter, setMarketFilter] = useState("ambos"); // "ambos" | "usd" | "clp"
+  const [marketFilter, setMarketFilter] = useState("ambos");
   const [positions, setPositions] = useState(() => {
     try { return JSON.parse(localStorage.getItem("pt_positions")) || INITIAL_POSITIONS; } catch { return INITIAL_POSITIONS; }
   });
@@ -138,6 +186,9 @@ function App() {
   const [manualPrices, setManualPrices] = useState(() => {
     try { return JSON.parse(localStorage.getItem("pt_manual")) || {}; } catch { return {}; }
   });
+  const [companyInfo, setCompanyInfo] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("pt_info")) || {}; } catch { return {}; }
+  });
   const [priceData, setPriceData] = useState({});
   const [usdClp, setUsdClp] = useState(null);
   const [loading, setLoading] = useState({});
@@ -147,6 +198,7 @@ function App() {
   const [editingTicker, setEditingTicker] = useState(null);
   const [editVal, setEditVal] = useState("");
   const [noteModal, setNoteModal] = useState(null);
+  const [editTxModal, setEditTxModal] = useState(null);
   const [showExportModal, setShowExportModal] = useState(false);
   const [exportText, setExportText] = useState("");
   const [copyLabel, setCopyLabel] = useState("📋 COPIAR");
@@ -168,6 +220,7 @@ function App() {
   useEffect(() => { localStorage.setItem("pt_watchlist", JSON.stringify(watchlist)); }, [watchlist]);
   useEffect(() => { localStorage.setItem("pt_transactions", JSON.stringify(transactions)); }, [transactions]);
   useEffect(() => { localStorage.setItem("pt_manual", JSON.stringify(manualPrices)); }, [manualPrices]);
+  useEffect(() => { localStorage.setItem("pt_info", JSON.stringify(companyInfo)); }, [companyInfo]);
 
   const fetchAll = useCallback(async () => {
     const usdTickers = [...new Set([
@@ -203,7 +256,18 @@ function App() {
       setLoading(l => ({ ...l, [ticker]: false }));
     }));
 
-    // Only STOP LOSS alerts
+    // Fetch company info for watchlist tickers not yet cached
+    const infoUpdates = {};
+    await Promise.all(watchlist.map(async (w) => {
+      if (!companyInfo[w.ticker]) {
+        const info = await fetchInfo(w.ticker);
+        if (info) infoUpdates[w.ticker] = info;
+      }
+    }));
+    if (Object.keys(infoUpdates).length > 0) {
+      setCompanyInfo(prev => ({ ...prev, ...infoUpdates }));
+    }
+
     positions.forEach(p => {
       if (p.currency !== "USD") return;
       const pd = updates[p.ticker];
@@ -218,7 +282,7 @@ function App() {
     setLastUpdate(new Date());
     const errors = Object.values(updates).filter(u => u.error).length;
     setFetchStatus(errors > 0 ? `${errors} sin datos` : "");
-  }, [positions, watchlist]);
+  }, [positions, watchlist, companyInfo]);
 
   useEffect(() => { fetchAll(); }, []);
 
@@ -252,7 +316,7 @@ function App() {
   };
 
   const exportJSON = () => {
-    const data = { exportedAt: new Date().toISOString(), positions, watchlist, transactions, manualPrices };
+    const data = { exportedAt: new Date().toISOString(), positions, watchlist, transactions, manualPrices, companyInfo };
     const json = JSON.stringify(data, null, 2);
     setExportText(json);
     setShowExportModal(true);
@@ -272,6 +336,7 @@ function App() {
       if (data.watchlist) setWatchlist(data.watchlist);
       if (data.transactions) setTransactions(data.transactions);
       if (data.manualPrices) setManualPrices(data.manualPrices);
+      if (data.companyInfo) setCompanyInfo(data.companyInfo);
       setImportSuccess(true);
       setImportText("");
       setTimeout(() => { setShowImportModal(false); setImportSuccess(false); }, 1500);
@@ -321,6 +386,11 @@ function App() {
     setNewTx({ ticker: "", date: new Date().toISOString().split("T")[0], qty: "", price: "", action: "BUY", currency: "USD" });
     setShowAddTx(false);
   };
+  const deleteTransaction = (id) => setTransactions(t => t.filter(x => x.id !== id));
+  const saveEditTx = (updated) => {
+    setTransactions(t => t.map(x => x.id === updated.id ? updated : x));
+    setEditTxModal(null);
+  };
 
   const typeColor = (t) => t === "largo" ? "#5b9cf6" : t === "swing" ? "#f0c040" : "#8899aa";
 
@@ -349,7 +419,7 @@ function App() {
     <div style={{ overflowX: "auto", marginBottom: 20 }}>
       <table style={s.table}>
         <thead>
-          <tr>{["TICKER","TIPO","QTY","PROM","PRECIO","VALOR","PESO%","P&L","P&L%", ...(!isCLP ? ["DIST SL","RSI D","RSI W"] : []), "NOTA",""].map((h, i) => <th key={i} style={s.th}>{h}</th>)}</tr>
+          <tr>{["TICKER","TIPO","QTY","PROM","PRECIO","VALOR","PESO%","P&L","P&L%",...(!isCLP?["DIST SL","RSI D","RSI W"]:[]),"NOTA",""].map((h,i)=><th key={i} style={s.th}>{h}</th>)}</tr>
         </thead>
         <tbody>
           {posList.map(pos => {
@@ -366,15 +436,11 @@ function App() {
             const totalPool = isCLP ? totalCLPCurrent : totalUSDCurrent;
             const peso = totalCurrent != null && totalPool > 0 ? (totalCurrent / totalPool) * 100 : null;
             const hasNote = pos.nota && pos.nota.trim().length > 0;
-
             return (
               <tr key={pos.id} style={{ opacity: pos.status === "salida" ? 0.6 : 1, background: nearSL ? "#ff4d6d07" : "transparent" }}>
                 <td style={s.td}>
-                  {isCLP ? (
-                    <span style={{ fontWeight: 700, color: "#e0ecf8" }}>{pos.ticker}</span>
-                  ) : (
-                    <span className="tv-link" style={{ fontWeight: 700, color: "#e0ecf8" }} onClick={() => openTV(pos.ticker)}>{pos.ticker} ↗</span>
-                  )}
+                  {isCLP ? <span style={{ fontWeight: 700, color: "#e0ecf8" }}>{pos.ticker}</span>
+                    : <span className="tv-link" style={{ fontWeight: 700, color: "#e0ecf8" }} onClick={() => openTV(pos.ticker)}>{pos.ticker} ↗</span>}
                   <div style={{ fontSize: 9, color: "#445" }}>{pos.company}</div>
                   {pos.status === "salida" && <div style={{ fontSize: 9, color: "#ff4d6d" }}>EN SALIDA</div>}
                 </td>
@@ -404,15 +470,7 @@ function App() {
                 <td style={s.td}><span style={{ color: "#8899aa" }}>{peso != null ? `${fmt(peso, 1)}%` : "—"}</span></td>
                 <td style={s.td}><span style={{ color: clr(pnl) }}>{pnl != null ? `${pnl >= 0 ? "+" : ""}${isCLP ? fmtCLP(pnl) : `$${fmt(pnl)}`}` : "—"}</span></td>
                 <td style={s.td}><span style={{ color: clr(pnlPct) }}>{fmtPct(pnlPct)}</span></td>
-                {!isCLP && (
-                  <td style={s.td}>
-                    {distToSL != null ? (
-                      <span style={{ color: distToSL < 3 ? "#ff4d6d" : distToSL < 8 ? "#f0c040" : "#556", fontSize: 11, fontWeight: distToSL < 3 ? 700 : 400 }}>
-                        {distToSL > 0 ? `${fmt(distToSL, 1)}%` : "⚠ SL"}
-                      </span>
-                    ) : "—"}
-                  </td>
-                )}
+                {!isCLP && <td style={s.td}>{distToSL != null ? <span style={{ color: distToSL < 3 ? "#ff4d6d" : distToSL < 8 ? "#f0c040" : "#556", fontSize: 11, fontWeight: distToSL < 3 ? 700 : 400 }}>{distToSL > 0 ? `${fmt(distToSL, 1)}%` : "⚠ SL"}</span> : "—"}</td>}
                 {!isCLP && <td style={s.td}><RSIBar value={pd?.rsiD} /></td>}
                 {!isCLP && <td style={s.td}><RSIBar value={pd?.rsiW} /></td>}
                 <td style={s.td}>
@@ -450,17 +508,11 @@ function App() {
           <div style={{ display: "flex", gap: 20, justifyContent: "flex-end", marginBottom: 6, flexWrap: "wrap" }}>
             <div>
               <div style={{ fontSize: 9, color: "#5b9cf6", letterSpacing: 1 }}>NYSE · NO REALIZADO</div>
-              <div style={{ color: clr(totalUSDUnrealized), fontSize: 15, fontWeight: 700 }}>
-                {totalUSDUnrealized >= 0 ? "+" : ""}${fmt(totalUSDUnrealized)}
-                <span style={{ fontSize: 10, marginLeft: 6 }}>({fmtPct(totalUSDUnrealizedPct)})</span>
-              </div>
+              <div style={{ color: clr(totalUSDUnrealized), fontSize: 15, fontWeight: 700 }}>{totalUSDUnrealized >= 0 ? "+" : ""}${fmt(totalUSDUnrealized)} <span style={{ fontSize: 10 }}>({fmtPct(totalUSDUnrealizedPct)})</span></div>
             </div>
             <div>
               <div style={{ fontSize: 9, color: "#f0c040", letterSpacing: 1 }}>BSC · NO REALIZADO</div>
-              <div style={{ color: clr(totalCLPUnrealized), fontSize: 15, fontWeight: 700 }}>
-                {totalCLPUnrealized >= 0 ? "+" : ""}{fmtCLP(totalCLPUnrealized)}
-                <span style={{ fontSize: 10, marginLeft: 6 }}>({fmtPct(totalCLPUnrealizedPct)})</span>
-              </div>
+              <div style={{ color: clr(totalCLPUnrealized), fontSize: 15, fontWeight: 700 }}>{totalCLPUnrealized >= 0 ? "+" : ""}{fmtCLP(totalCLPUnrealized)} <span style={{ fontSize: 10 }}>({fmtPct(totalCLPUnrealizedPct)})</span></div>
             </div>
             <div>
               <div style={{ fontSize: 9, color: "#00e5a0", letterSpacing: 1 }}>REALIZADO</div>
@@ -477,7 +529,7 @@ function App() {
         </div>
       </div>
 
-      {/* STOP LOSS alerts only */}
+      {/* Alerts — STOP LOSS only */}
       {alerts.length > 0 && (
         <div style={{ padding: "10px 20px 0" }}>
           {alerts.map((a, i) => (
@@ -500,11 +552,9 @@ function App() {
 
         {/* ── PORTFOLIO ── */}
         {tab === "portfolio" && (<>
-
-          {/* Summary cards */}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 10, marginBottom: 6 }}>
             {[
-              { label: "VALOR NYSE", val: `$${fmt(totalUSDCurrent)}`, c: "#5b9cf6", accent: "#5b9cf622" },
+              { label: "VALOR NYSE", val: `$${fmt(totalUSDCurrent)}`, c: "#5b9cf6" },
               { label: "P&L NYSE", val: `${totalUSDUnrealized >= 0 ? "+" : ""}$${fmt(totalUSDUnrealized)}`, c: clr(totalUSDUnrealized) },
               { label: "P&L NYSE %", val: fmtPct(totalUSDUnrealizedPct), c: clr(totalUSDUnrealizedPct) },
               { label: "REALIZADO NYSE", val: `${totalRealizedUSD >= 0 ? "+" : ""}$${fmt(totalRealizedUSD)}`, c: clr(totalRealizedUSD) },
@@ -529,7 +579,6 @@ function App() {
             ))}
           </div>
 
-          {/* Filter + Add */}
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
             <div style={{ display: "flex", gap: 6 }}>
               <button style={s.filterBtn(marketFilter === "ambos", "#00e5a0")} onClick={() => setMarketFilter("ambos")}>AMBOS</button>
@@ -539,7 +588,6 @@ function App() {
             <button style={s.btn()} onClick={() => setShowAddPos(true)}>+ AGREGAR</button>
           </div>
 
-          {/* USD Section */}
           {showUSD && usdPositions.length > 0 && (<>
             <div style={s.sectionHeader("#5b9cf6")}>
               <span>● NYSE — BOLSA DE NEW YORK</span>
@@ -548,7 +596,6 @@ function App() {
             {renderPositionTable(usdPositions, false)}
           </>)}
 
-          {/* CLP Section */}
           {showCLP && clpPositions.length > 0 && (<>
             <div style={s.sectionHeader("#f0c040")}>
               <span>● BSC — BOLSA DE SANTIAGO</span>
@@ -560,51 +607,85 @@ function App() {
 
         {/* ── WATCHLIST ── */}
         {tab === "watchlist" && (<>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-            <span style={{ fontSize: 10, letterSpacing: 2, color: "#445" }}>WATCHLIST · click tarjeta → TradingView</span>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+            <span style={{ fontSize: 10, letterSpacing: 2, color: "#445" }}>WATCHLIST · click → TradingView</span>
             <button style={s.btn()} onClick={() => setShowAddWatch(true)}>+ AGREGAR</button>
           </div>
           {watchlist.length === 0 && <div style={{ color: "#334", padding: 24, textAlign: "center", fontSize: 12 }}>Watchlist vacío.</div>}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(260px,1fr))", gap: 12 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(220px,1fr))", gap: 10 }}>
             {watchlist.map(w => {
               const pd = priceData[w.ticker];
+              const info = companyInfo[w.ticker];
               const hasNote = w.nota && w.nota.trim().length > 0;
+              const pe = info?.pe;
               return (
-                <div key={w.id} style={{ ...s.card(), position: "relative", cursor: "pointer", transition: "border-color 0.2s", borderColor: "#1a2535" }}
-                  onClick={() => openTV(w.ticker)}
-                  onMouseEnter={e => e.currentTarget.style.borderColor = "#00e5a044"}
-                  onMouseLeave={e => e.currentTarget.style.borderColor = "#1a2535"}>
-                  <div style={{ position: "absolute", top: 10, right: 10, display: "flex", gap: 5 }}>
-                    <button style={{ ...s.btn(hasNote ? "#f0c040" : "#445"), padding: "2px 6px", fontSize: 10, zIndex: 2 }}
+                <div key={w.id} className="wcard" style={{ background: "#0c1624", border: "1px solid #1a2535", borderRadius: 8, padding: 14, position: "relative", cursor: "pointer" }}
+                  onClick={() => openTV(w.ticker)}>
+                  {/* Action buttons */}
+                  <div style={{ position: "absolute", top: 8, right: 8, display: "flex", gap: 4 }}>
+                    <button style={{ ...s.btn(hasNote ? "#f0c040" : "#334"), padding: "1px 5px", fontSize: 9, zIndex: 2 }}
                       onClick={e => { e.stopPropagation(); setNoteModal({ ticker: w.ticker, type: "watchlist", id: w.id, note: w.nota || "" }); }}>📝</button>
-                    <button style={{ ...s.btn("#ff4d6d"), padding: "2px 7px", zIndex: 2 }}
+                    <button style={{ ...s.btn("#ff4d6d"), padding: "1px 5px", fontSize: 9, zIndex: 2 }}
                       onClick={e => { e.stopPropagation(); removeWatch(w.id); }}>✕</button>
                   </div>
-                  <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 4 }}>
-                    <span style={{ fontWeight: 700, fontSize: 15, color: "#e0ecf8" }}>{w.ticker}</span>
+
+                  {/* Ticker + badge */}
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2, paddingRight: 52 }}>
+                    <span style={{ fontWeight: 700, fontSize: 14, color: "#e0ecf8" }}>{w.ticker}</span>
                     <span style={s.badge(typeColor(w.type))}>{w.type.toUpperCase()}</span>
                   </div>
-                  <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 8 }}>
-                    <div style={{ fontSize: 18, fontWeight: 700, color: "#c8d6e5" }}>
-                      {loading[w.ticker] ? <span style={{ color: "#334", fontSize: 12 }}>cargando…</span> : pd?.error ? <span style={{ color: "#ff4d6d", fontSize: 11 }}>sin datos</span> : pd?.price ? `$${fmt(pd.price)}` : "—"}
+
+                  {/* Company name */}
+                  {info?.name && <div style={{ fontSize: 10, color: "#6a8aaa", marginBottom: 1 }}>{info.name}</div>}
+
+                  {/* Sector / Industry */}
+                  {(info?.sector || info?.industry) && (
+                    <div style={{ fontSize: 9, color: "#445", marginBottom: 8 }}>
+                      {info.sector}{info.sector && info.industry ? " · " : ""}{info.industry}
                     </div>
+                  )}
+
+                  {/* Price + day change */}
+                  <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 6 }}>
+                    <span style={{ fontSize: 17, fontWeight: 700, color: "#c8d6e5" }}>
+                      {loading[w.ticker] ? <span style={{ color: "#334", fontSize: 11 }}>…</span> : pd?.error ? <span style={{ color: "#ff4d6d", fontSize: 10 }}>sin datos</span> : pd?.price ? `$${fmt(pd.price)}` : "—"}
+                    </span>
                     {pd?.dayChange != null && (
-                      <span style={{ fontSize: 12, fontWeight: 700, color: clr(pd.dayChange) }}>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: clr(pd.dayChange) }}>
                         {pd.dayChange >= 0 ? "+" : ""}{fmt(pd.dayChange, 2)}%
                       </span>
                     )}
                   </div>
-                  <div style={{ marginBottom: 6 }}>
-                    <div style={{ fontSize: 9, color: "#445", marginBottom: 2 }}>RSI DIARIO</div>
-                    <RSIBar value={pd?.rsiD} />
+
+                  {/* P/E + RSI row */}
+                  <div style={{ display: "flex", gap: 12, marginBottom: hasNote || w.tesis ? 8 : 0 }}>
+                    {pe != null && (
+                      <div>
+                        <div style={{ fontSize: 8, color: "#445", letterSpacing: 1 }}>P/E</div>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: pe > 40 ? "#f0c040" : pe > 0 ? "#00e5a0" : "#ff4d6d" }}>{fmt(pe, 1)}x</div>
+                      </div>
+                    )}
+                    {pd?.rsiD != null && (
+                      <div>
+                        <div style={{ fontSize: 8, color: "#445", letterSpacing: 1 }}>RSI D</div>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: pd.rsiD < 35 ? "#00e5a0" : pd.rsiD > 65 ? "#ff4d6d" : "#f0c040" }}>{fmt(pd.rsiD, 1)}</div>
+                      </div>
+                    )}
+                    {pd?.rsiW != null && (
+                      <div>
+                        <div style={{ fontSize: 8, color: "#445", letterSpacing: 1 }}>RSI W</div>
+                        <div style={{ fontSize: 12, fontWeight: 700, color: pd.rsiW < 35 ? "#00e5a0" : pd.rsiW > 65 ? "#ff4d6d" : "#f0c040" }}>{fmt(pd.rsiW, 1)}</div>
+                      </div>
+                    )}
                   </div>
-                  <div style={{ marginBottom: (w.tesis || hasNote) ? 10 : 0 }}>
-                    <div style={{ fontSize: 9, color: "#445", marginBottom: 2 }}>RSI SEMANAL</div>
-                    <RSIBar value={pd?.rsiW} />
-                  </div>
-                  {w.tesis && <div style={{ fontSize: 10, color: "#556", borderTop: "1px solid #1a2535", paddingTop: 8, marginTop: 8 }}>{w.tesis}</div>}
-                  {hasNote && <div style={{ fontSize: 10, color: "#f0c04099", marginTop: 6 }}>📝 {w.nota}</div>}
-                  <div style={{ fontSize: 9, color: "#334", marginTop: 8, textAlign: "right" }}>↗ TradingView</div>
+
+                  {/* Tesis */}
+                  {w.tesis && <div style={{ fontSize: 9, color: "#556", borderTop: "1px solid #1a2535", paddingTop: 6, marginTop: 4 }}>{w.tesis}</div>}
+
+                  {/* Nota */}
+                  {hasNote && <div style={{ fontSize: 9, color: "#f0c04088", marginTop: 4 }}>📝 {w.nota}</div>}
+
+                  <div style={{ fontSize: 8, color: "#223", marginTop: 6, textAlign: "right" }}>↗ TV</div>
                 </div>
               );
             })}
@@ -619,7 +700,7 @@ function App() {
           </div>
           {transactions.length === 0 && <div style={{ color: "#334", padding: 24, textAlign: "center", fontSize: 12 }}>Sin transacciones.</div>}
           <table style={s.table}>
-            <thead><tr>{["FECHA","ACCIÓN","TICKER","QTY","PRECIO","TOTAL","P&L REALIZADO","MONEDA"].map(h => <th key={h} style={s.th}>{h}</th>)}</tr></thead>
+            <thead><tr>{["FECHA","ACCIÓN","TICKER","QTY","PRECIO","TOTAL","P&L REALIZADO","BOLSA",""].map(h => <th key={h} style={s.th}>{h}</th>)}</tr></thead>
             <tbody>
               {transactions.map(tx => (
                 <tr key={tx.id}>
@@ -631,6 +712,12 @@ function App() {
                   <td style={s.td}>{tx.currency === "CLP" ? fmtCLP(tx.qty * tx.price) : `$${fmt(tx.qty * tx.price)}`}</td>
                   <td style={s.td}>{tx.realizedPnL != null ? <span style={{ color: clr(tx.realizedPnL), fontWeight: 700 }}>{tx.realizedPnL >= 0 ? "+" : ""}{tx.currency === "CLP" ? fmtCLP(tx.realizedPnL) : `$${fmt(tx.realizedPnL)}`}</span> : <span style={{ color: "#334" }}>—</span>}</td>
                   <td style={s.td}><span style={{ color: tx.currency === "USD" ? "#5b9cf6" : "#f0c040", fontSize: 10, fontWeight: 700 }}>{tx.currency === "USD" ? "NYSE" : "BSC"}</span></td>
+                  <td style={s.td}>
+                    <div style={{ display: "flex", gap: 4 }}>
+                      <button style={{ ...s.btn("#5b9cf6"), padding: "2px 6px", fontSize: 10 }} onClick={() => setEditTxModal(tx)}>✏️</button>
+                      <button style={{ ...s.btn("#ff4d6d"), padding: "2px 6px", fontSize: 10 }} onClick={() => deleteTransaction(tx.id)}>✕</button>
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -640,6 +727,9 @@ function App() {
 
       {/* NOTE MODAL */}
       {noteModal && <NoteModal ticker={noteModal.ticker} initialNote={noteModal.note} onSave={saveNote} onClose={() => setNoteModal(null)} />}
+
+      {/* EDIT TX MODAL */}
+      {editTxModal && <EditTxModal tx={editTxModal} onSave={saveEditTx} onClose={() => setEditTxModal(null)} />}
 
       {/* SELL MODAL */}
       {showSellModal && sellPos && (
