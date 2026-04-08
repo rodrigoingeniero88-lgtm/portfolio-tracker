@@ -605,7 +605,17 @@ function App() {
 
                   <div style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: 1, paddingRight: 48 }}>
                     <span style={{ fontWeight: 700, fontSize: 13, color: "#e0ecf8" }}>{w.ticker}</span>
-                    <span style={s.badge(typeColor(w.type))}>{w.type.toUpperCase()}</span>
+                  </div>
+                  {/* Type selector dropdown */}
+                  <div style={{ marginBottom: 4 }} onClick={e => e.stopPropagation()}>
+                    <select
+                      value={w.type}
+                      onChange={e => setWatchlist(ws => ws.map(x => x.id === w.id ? { ...x, type: e.target.value } : x))}
+                      style={{ background: typeColor(w.type) + "22", border: `1px solid ${typeColor(w.type)}44`, borderRadius: 3, color: typeColor(w.type), fontSize: 9, fontFamily: ff, fontWeight: 700, letterSpacing: 1, padding: "2px 5px", cursor: "pointer" }}>
+                      <option value="observación">OBSERVACIÓN</option>
+                      <option value="swing">SWING</option>
+                      <option value="largo">LARGO</option>
+                    </select>
                   </div>
                   {info?.name && <div style={{ fontSize: 10, color: "#6a8aaa", marginBottom: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{info.name}</div>}
                   {(info?.sector || info?.industry) && <div style={{ fontSize: 9, color: "#445", marginBottom: 6, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{info.sector}{info.sector && info.industry ? " · " : ""}{info.industry}</div>}
@@ -623,8 +633,8 @@ function App() {
                     {pd?.rsiW != null && <div><div style={{ fontSize: 8, color: "#445", letterSpacing: 1 }}>RSI W</div><div style={{ fontSize: 11, fontWeight: 700, color: pd.rsiW < 35 ? "#00e5a0" : pd.rsiW > 65 ? "#ff4d6d" : "#f0c040" }}>{fmt(pd.rsiW, 1)}</div></div>}
                   </div>
 
-                  {w.tesis && <div style={{ fontSize: 9, color: "#556", borderTop: "1px solid #1a2535", paddingTop: 5, marginTop: 6, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{w.tesis}</div>}
-                  {hasNote && <div style={{ fontSize: 9, color: "#f0c04088", marginTop: 3, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>📝 {w.nota}</div>}
+                  {w.tesis && <div style={{ fontSize: 10, color: "#556", borderTop: "1px solid #1a2535", paddingTop: 5, marginTop: 6, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{w.tesis}</div>}
+                  {hasNote && <div style={{ fontSize: 11, color: "#f0c040bb", marginTop: 4, lineHeight: 1.4 }}>📝 {w.nota}</div>}
                   <div style={{ fontSize: 8, color: "#223", marginTop: 5, textAlign: "right" }}>↗ TV</div>
                 </div>
               );
