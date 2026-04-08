@@ -14,9 +14,8 @@
   <script type="text/babel" data-presets="react">
 const { useState, useEffect, useCallback } = React;
 
-const YF_BASE = "https://query1.finance.yahoo.com/v8/finance/chart/";
 async function fetchYahooWithFallback(ticker, interval, range) {
-  const res = await fetch(`/api/quote?ticker=${ticker}&interval=${interval}&range=${range}`, 
+  const res = await fetch(`/api/quote?ticker=${ticker}&interval=${interval}&range=${range}`,
     { signal: AbortSignal.timeout(10000) });
   if (!res.ok) throw new Error("API error");
   const data = await res.json();
@@ -24,16 +23,12 @@ async function fetchYahooWithFallback(ticker, interval, range) {
   if (!result) throw new Error("No data");
   const closes = result.indicators.quote[0].close.filter(Boolean);
   if (!closes.length) throw new Error("No closes");
-  return { closes, lastPrice: closes[closes.length - 1] };
+  const meta = result.meta;
+  const prevClose = meta.chartPreviousClose || meta.previousClose || closes[closes.length - 2] || closes[closes.length - 1];
+  const lastPrice = closes[closes.length - 1];
+  const dayChange = prevClose ? ((lastPrice - prevClose) / prevClose) * 100 : null;
+  return { closes, lastPrice, dayChange };
 }
-
-const INITIAL_POSITIONS = [
-  { id: 1, ticker: "VITL", company: "Vital Farms", type: "largo", qty: 83.746, avgPrice: 13.02, currency: "USD", broker: "Fintual", status: "active", tesis: "Ventas +25% anual, sin deuda, castigada por problema contable ya resuelto. PO analistas $48. DCA." },
-  { id: 2, ticker: "LTM", company: "LATAM Airlines", type: "largo", qty: 40000, avgPrice: 22.23, currency: "CLP", broker: "Chile", status: "salida", tesis: "Posición en salida. No agregar ni promediar." },
-  { id: 3, ticker: "INVERCAP", company: "Invercap", type: "largo", qty: 300, avgPrice: 1928.6, currency: "CLP", broker: "Chile", status: "salida", tesis: "Posición en salida. No agregar ni promediar." },
-];
-
-const STOP_LOSS = { swing: 0.08, largo: 0.15 };
 
 function calcRSI(closes, period = 14) {
   if (closes.length < period + 1) return null;
@@ -52,14 +47,22 @@ function calcRSI(closes, period = 14) {
   return Math.round((100 - 100 / (1 + avgGain / avgLoss)) * 100) / 100;
 }
 
+const INITIAL_POSITIONS = [
+  { id: 1, ticker: "VITL", company: "Vital Farms", type: "largo", qty: 83.746, avgPrice: 13.02, currency: "USD", broker: "Fintual", status: "active", tesis: "Ventas +25% anual, sin deuda, castigada por problema contable ya resuelto. PO analistas $48. DCA." },
+  { id: 2, ticker: "LTM", company: "LATAM Airlines", type: "largo", qty: 40000, avgPrice: 22.23, currency: "CLP", broker: "Chile", status: "salida", tesis: "Posición en salida. No agregar ni promediar." },
+  { id: 3, ticker: "INVERCAP", company: "Invercap", type: "largo", qty: 300, avgPrice: 1928.6, currency: "CLP", broker: "Chile", status: "salida", tesis: "Posición en salida. No agregar ni promediar." },
+];
+
+const STOP_LOSS = { swing: 0.08, largo: 0.15 };
 const fmt = (n, dec = 2) => n == null ? "—" : n.toLocaleString("en-US", { minimumFractionDigits: dec, maximumFractionDigits: dec });
 const fmtPct = (n) => n == null ? "—" : `${n > 0 ? "+" : ""}${fmt(n)}%`;
 const clr = (n) => n == null ? "#8899aa" : n >= 0 ? "#00e5a0" : "#ff4d6d";
 const rsiColor = (r) => r == null ? "#8899aa" : r < 35 ? "#00e5a0" : r > 65 ? "#ff4d6d" : "#f0c040";
 const rsiLabel = (r) => r == null ? "" : r < 35 ? "SOBREVENDIDO" : r > 65 ? "SOBRECOMPRADO" : "NEUTRAL";
+const ff = "'IBM Plex Mono','Courier New',monospace";
 
 function RSIBar({ value }) {
-  if (value == null) return React.createElement("span", { style: { color: "#556" } }, "—");
+  if (value == null) return <span style={{ color: "#556" }}>—</span>;
   const pct = Math.min(Math.max(value, 0), 100);
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -96,6 +99,9 @@ function App() {
   const [importText, setImportText] = useState("");
   const [importError, setImportError] = useState("");
   const [importSuccess, setImportSuccess] = useState(false);
+  const [showSellModal, setShowSellModal] = useState(false);
+  const [sellPos, setSellPos] = useState(null);
+  const [sellPrice, setSellPrice] = useState("");
   const [showAddPos, setShowAddPos] = useState(false);
   const [showAddWatch, setShowAddWatch] = useState(false);
   const [showAddTx, setShowAddTx] = useState(false);
@@ -126,11 +132,11 @@ function App() {
         ]);
         const rsiD = calcRSI(daily.closes);
         const rsiW = calcRSI(weekly.closes);
-        updates[ticker] = { price: daily.lastPrice, rsiD, rsiW, ts: Date.now() };
+        updates[ticker] = { price: daily.lastPrice, dayChange: daily.dayChange, rsiD, rsiW, ts: Date.now() };
         if (rsiD != null && (rsiD < 35 || rsiD > 65)) newAlerts.push({ ticker, type: "RSI Diario", value: rsiD, label: rsiLabel(rsiD) });
         if (rsiW != null && (rsiW < 35 || rsiW > 65)) newAlerts.push({ ticker, type: "RSI Semanal", value: rsiW, label: rsiLabel(rsiW) });
       } catch {
-        updates[ticker] = { price: null, rsiD: null, rsiW: null, error: true };
+        updates[ticker] = { price: null, dayChange: null, rsiD: null, rsiW: null, error: true };
       }
       loaded++;
       setFetchStatus(`Cargando... ${loaded}/${tickers.length}`);
@@ -153,6 +159,16 @@ function App() {
 
   useEffect(() => { fetchAll(); }, []);
 
+  const usdPositions = positions.filter(p => p.currency === "USD");
+  const totalCurrentUSD = usdPositions.reduce((acc, p) => {
+    const pd = priceData[p.ticker];
+    return acc + (pd?.price ? pd.price * p.qty : p.avgPrice * p.qty);
+  }, 0);
+  const totalCostUSD = usdPositions.reduce((acc, p) => acc + p.avgPrice * p.qty, 0);
+  const totalUnrealizedPnL = totalCurrentUSD - totalCostUSD;
+  const totalUnrealizedPct = totalCostUSD ? (totalUnrealizedPnL / totalCostUSD) * 100 : 0;
+  const totalRealizedPnL = transactions.filter(t => t.action === "SELL" && t.realizedPnL != null).reduce((acc, t) => acc + t.realizedPnL, 0);
+
   const exportJSON = () => {
     const data = { exportedAt: new Date().toISOString(), positions, watchlist, transactions };
     const json = JSON.stringify(data, null, 2);
@@ -160,19 +176,17 @@ function App() {
     setShowExportModal(true);
     navigator.clipboard.writeText(json).catch(() => {});
   };
-
   const copyExport = () => {
     navigator.clipboard.writeText(exportText).catch(() => {});
     setCopyLabel("✓ COPIADO");
     setTimeout(() => setCopyLabel("📋 COPIAR"), 2000);
   };
-
   const importJSON = () => {
     setImportError("");
     try {
       const data = JSON.parse(importText);
       if (!data.positions) throw new Error("JSON inválido");
-      if (data.positions) setPositions(data.positions);
+      setPositions(data.positions);
       if (data.watchlist) setWatchlist(data.watchlist);
       if (data.transactions) setTransactions(data.transactions);
       setImportSuccess(true);
@@ -181,21 +195,33 @@ function App() {
     } catch (e) { setImportError(e.message || "JSON inválido"); }
   };
 
-  const totalUSD = positions.filter(p => p.currency === "USD").reduce((acc, p) => {
-    const pd = priceData[p.ticker];
-    return acc + (pd?.price ? pd.price * p.qty : p.avgPrice * p.qty);
-  }, 0);
-  const costUSD = positions.filter(p => p.currency === "USD").reduce((acc, p) => acc + p.avgPrice * p.qty, 0);
-  const totalPnL = totalUSD - costUSD;
-  const totalPnLPct = costUSD ? (totalPnL / costUSD) * 100 : 0;
-
   const addPosition = () => {
     if (!newPos.ticker || !newPos.qty || !newPos.avgPrice) return;
-    setPositions(p => [...p, { ...newPos, id: Date.now(), qty: +newPos.qty, avgPrice: +newPos.avgPrice, status: "active" }]);
+    const pos = { ...newPos, id: Date.now(), qty: +newPos.qty, avgPrice: +newPos.avgPrice, status: "active" };
+    setPositions(p => [...p, pos]);
+    setTransactions(t => [{ id: Date.now() + 1, ticker: pos.ticker, date: new Date().toISOString().split("T")[0], action: "BUY", qty: pos.qty, price: pos.avgPrice, currency: pos.currency, realizedPnL: null }, ...t]);
     setNewPos({ ticker: "", company: "", type: "largo", qty: "", avgPrice: "", currency: "USD", broker: "IBKR", tesis: "" });
     setShowAddPos(false);
   };
-  const removePosition = (id) => setPositions(p => p.filter(x => x.id !== id));
+
+  const handleRemovePosition = (pos) => {
+    setSellPos(pos);
+    setSellPrice(priceData[pos.ticker]?.price ? String(priceData[pos.ticker].price.toFixed(2)) : "");
+    setShowSellModal(true);
+  };
+
+  const confirmSell = () => {
+    if (!sellPos || !sellPrice) return;
+    const price = parseFloat(sellPrice);
+    if (isNaN(price)) return;
+    const realizedPnL = (price - sellPos.avgPrice) * sellPos.qty;
+    setTransactions(t => [{ id: Date.now(), ticker: sellPos.ticker, date: new Date().toISOString().split("T")[0], action: "SELL", qty: sellPos.qty, price, currency: sellPos.currency, realizedPnL }, ...t]);
+    setPositions(p => p.filter(x => x.id !== sellPos.id));
+    setShowSellModal(false);
+    setSellPos(null);
+    setSellPrice("");
+  };
+
   const addWatchlist = () => {
     if (!newWatch.ticker) return;
     setWatchlist(w => [...w, { ...newWatch, id: Date.now(), ticker: newWatch.ticker.toUpperCase() }]);
@@ -203,14 +229,15 @@ function App() {
     setShowAddWatch(false);
   };
   const removeWatch = (id) => setWatchlist(w => w.filter(x => x.id !== id));
+  const openTradingView = (ticker) => window.open(`https://www.tradingview.com/chart/?symbol=${ticker}`, "tradingview_window");
+
   const addTransaction = () => {
     if (!newTx.ticker || !newTx.qty || !newTx.price) return;
-    setTransactions(t => [{ ...newTx, id: Date.now(), qty: +newTx.qty, price: +newTx.price }, ...t]);
+    setTransactions(t => [{ ...newTx, id: Date.now(), qty: +newTx.qty, price: +newTx.price, realizedPnL: null }, ...t]);
     setNewTx({ ticker: "", date: new Date().toISOString().split("T")[0], qty: "", price: "", action: "BUY", currency: "USD" });
     setShowAddTx(false);
   };
 
-  const ff = "'IBM Plex Mono','Courier New',monospace";
   const s = {
     app: { fontFamily: ff, background: "#080d14", color: "#c8d6e5", minHeight: "100vh", paddingBottom: 60 },
     header: { background: "#0c1220", borderBottom: "1px solid #1e2d40", padding: "16px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 },
@@ -239,8 +266,17 @@ function App() {
           <div style={{ fontSize: 10, color: "#445", letterSpacing: 2 }}>IBKR · FINTUAL · CHILE</div>
         </div>
         <div style={{ textAlign: "right" }}>
-          <div style={{ color: clr(totalPnL), fontSize: 18, fontWeight: 700 }}>{totalPnL >= 0 ? "+" : ""}${fmt(totalPnL)}</div>
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end", marginTop: 4 }}>
+          <div style={{ display: "flex", gap: 20, justifyContent: "flex-end", marginBottom: 6 }}>
+            <div>
+              <div style={{ fontSize: 9, color: "#445", letterSpacing: 1 }}>NO REALIZADO</div>
+              <div style={{ color: clr(totalUnrealizedPnL), fontSize: 16, fontWeight: 700 }}>{totalUnrealizedPnL >= 0 ? "+" : ""}${fmt(totalUnrealizedPnL)} <span style={{ fontSize: 11 }}>({fmtPct(totalUnrealizedPct)})</span></div>
+            </div>
+            <div>
+              <div style={{ fontSize: 9, color: "#445", letterSpacing: 1 }}>REALIZADO</div>
+              <div style={{ color: clr(totalRealizedPnL), fontSize: 16, fontWeight: 700 }}>{totalRealizedPnL >= 0 ? "+" : ""}${fmt(totalRealizedPnL)}</div>
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
             <span style={{ fontSize: 10, color: "#334", alignSelf: "center" }}>{fetchStatus || (lastUpdate ? lastUpdate.toLocaleTimeString() : "—")}</span>
             <button onClick={fetchAll} style={{ ...s.btn(), padding: "4px 9px", fontSize: 10 }}>↺ REF</button>
             <button onClick={() => { setShowImportModal(true); setImportText(""); setImportError(""); }} style={{ ...s.btn("#a78bfa"), padding: "4px 9px", fontSize: 10 }}>⬆ IMPORT</button>
@@ -268,10 +304,19 @@ function App() {
       </div>
 
       <div style={{ padding: "18px 20px" }}>
+
         {tab === "portfolio" && (<>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10, marginBottom: 14 }}>
-            {[{ label: "VALOR USD", val: `$${fmt(totalUSD)}`, c: "#c8d6e5" }, { label: "P&L", val: `${totalPnL >= 0 ? "+" : ""}$${fmt(totalPnL)}`, c: clr(totalPnL) }, { label: "P&L %", val: fmtPct(totalPnLPct), c: clr(totalPnLPct) }].map(item => (
-              <div key={item.label} style={s.card}><div style={s.label}>{item.label}</div><div style={s.val(item.c)}>{item.val}</div></div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 10, marginBottom: 14 }}>
+            {[
+              { label: "VALOR USD", val: `$${fmt(totalCurrentUSD)}`, c: "#c8d6e5" },
+              { label: "P&L NO REALIZADO", val: `${totalUnrealizedPnL >= 0 ? "+" : ""}$${fmt(totalUnrealizedPnL)}`, c: clr(totalUnrealizedPnL) },
+              { label: "P&L %", val: fmtPct(totalUnrealizedPct), c: clr(totalUnrealizedPct) },
+              { label: "P&L REALIZADO", val: `${totalRealizedPnL >= 0 ? "+" : ""}$${fmt(totalRealizedPnL)}`, c: clr(totalRealizedPnL) },
+            ].map(item => (
+              <div key={item.label} style={s.card}>
+                <div style={s.label}>{item.label}</div>
+                <div style={s.val(item.c)}>{item.val}</div>
+              </div>
             ))}
           </div>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
@@ -280,7 +325,9 @@ function App() {
           </div>
           <div style={{ overflowX: "auto" }}>
             <table style={s.table}>
-              <thead><tr>{["TICKER","TIPO","QTY","PROM","PRECIO","VALOR","P&L","P&L%","RSI D","RSI W",""].map(h => <th key={h} style={s.th}>{h}</th>)}</tr></thead>
+              <thead>
+                <tr>{["TICKER","TIPO","QTY","PROM","PRECIO","VALOR","PESO%","P&L","P&L%","DIST SL","RSI D","RSI W",""].map(h => <th key={h} style={s.th}>{h}</th>)}</tr>
+              </thead>
               <tbody>
                 {positions.map(pos => {
                   const pd = priceData[pos.ticker];
@@ -290,20 +337,34 @@ function App() {
                   const pnl = valor != null ? valor - cost : null;
                   const pnlPct = pnl != null ? (pnl / cost) * 100 : null;
                   const sl = STOP_LOSS[pos.type] || 0.08;
-                  const nearSL = pnlPct != null && pnlPct <= -(sl * 100 * 0.7);
+                  const distToSL = pnlPct != null ? (pnlPct - (-sl * 100)) : null;
+                  const nearSL = distToSL != null && distToSL < sl * 100 * 0.3;
+                  const peso = valor != null && totalCurrentUSD > 0 ? (valor / totalCurrentUSD) * 100 : null;
                   return (
                     <tr key={pos.id} style={{ opacity: pos.status === "salida" ? 0.55 : 1, background: nearSL ? "#ff4d6d07" : "transparent" }}>
-                      <td style={s.td}><div style={{ fontWeight: 700, color: "#e0ecf8" }}>{pos.ticker}</div><div style={{ fontSize: 9, color: "#445" }}>{pos.company}</div>{pos.status === "salida" && <div style={{ fontSize: 9, color: "#ff4d6d" }}>EN SALIDA</div>}</td>
+                      <td style={s.td}>
+                        <div style={{ fontWeight: 700, color: "#e0ecf8" }}>{pos.ticker}</div>
+                        <div style={{ fontSize: 9, color: "#445" }}>{pos.company}</div>
+                        {pos.status === "salida" && <div style={{ fontSize: 9, color: "#ff4d6d" }}>EN SALIDA</div>}
+                      </td>
                       <td style={s.td}><span style={s.badge(typeColor(pos.type))}>{pos.type.toUpperCase()}</span></td>
                       <td style={s.td}>{fmt(pos.qty, pos.qty % 1 === 0 ? 0 : 3)}</td>
                       <td style={s.td}>{fmt(pos.avgPrice)} <span style={{ fontSize: 9, color: "#445" }}>{pos.currency}</span></td>
-                      <td style={s.td}>{loading[pos.ticker] ? <span style={{ color: "#334" }}>…</span> : price ? `$${fmt(price)}` : pd?.error ? <span style={{ fontSize: 9, color: "#ff4d6d" }}>ERR</span> : <span style={{ color: "#334" }}>—</span>}</td>
+                      <td style={s.td}>{loading[pos.ticker] ? <span style={{ color: "#334" }}>…</span> : price ? `$${fmt(price)}` : pd?.error ? <span style={{ fontSize: 9, color: "#ff4d6d" }}>ERR</span> : "—"}</td>
                       <td style={s.td}>{valor ? `$${fmt(valor)}` : "—"}</td>
+                      <td style={s.td}><span style={{ color: "#8899aa" }}>{peso != null ? `${fmt(peso, 1)}%` : "—"}</span></td>
                       <td style={s.td}><span style={{ color: clr(pnl) }}>{pnl != null ? `${pnl >= 0 ? "+" : ""}$${fmt(pnl)}` : "—"}</span></td>
                       <td style={s.td}><span style={{ color: clr(pnlPct) }}>{fmtPct(pnlPct)}</span></td>
+                      <td style={s.td}>
+                        {distToSL != null && pos.currency === "USD" ? (
+                          <span style={{ color: distToSL < 3 ? "#ff4d6d" : distToSL < 8 ? "#f0c040" : "#556", fontSize: 11, fontWeight: distToSL < 3 ? 700 : 400 }}>
+                            {distToSL > 0 ? `${fmt(distToSL, 1)}%` : "⚠ SL"}
+                          </span>
+                        ) : "—"}
+                      </td>
                       <td style={s.td}><RSIBar value={pd?.rsiD} /></td>
                       <td style={s.td}><RSIBar value={pd?.rsiW} /></td>
-                      <td style={s.td}><button style={{ ...s.btn("#ff4d6d"), padding: "2px 7px" }} onClick={() => removePosition(pos.id)}>✕</button></td>
+                      <td style={s.td}><button style={{ ...s.btn("#ff4d6d"), padding: "2px 7px" }} onClick={() => handleRemovePosition(pos)}>✕</button></td>
                     </tr>
                   );
                 })}
@@ -314,7 +375,7 @@ function App() {
 
         {tab === "watchlist" && (<>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-            <span style={{ fontSize: 10, letterSpacing: 2, color: "#445" }}>WATCHLIST</span>
+            <span style={{ fontSize: 10, letterSpacing: 2, color: "#445" }}>WATCHLIST · click abre TradingView</span>
             <button style={s.btn()} onClick={() => setShowAddWatch(true)}>+ AGREGAR</button>
           </div>
           {watchlist.length === 0 && <div style={{ color: "#334", padding: 24, textAlign: "center", fontSize: 12 }}>Watchlist vacío.</div>}
@@ -322,18 +383,37 @@ function App() {
             {watchlist.map(w => {
               const pd = priceData[w.ticker];
               return (
-                <div key={w.id} style={{ ...s.card, position: "relative" }}>
-                  <button style={{ position: "absolute", top: 10, right: 10, ...s.btn("#ff4d6d"), padding: "2px 7px" }} onClick={() => removeWatch(w.id)}>✕</button>
-                  <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 6 }}>
+                <div key={w.id} style={{ ...s.card, position: "relative", cursor: "pointer", transition: "border-color 0.2s" }}
+                  onClick={() => openTradingView(w.ticker)}
+                  onMouseEnter={e => e.currentTarget.style.borderColor = "#00e5a044"}
+                  onMouseLeave={e => e.currentTarget.style.borderColor = "#1a2535"}>
+                  <button style={{ position: "absolute", top: 10, right: 10, ...s.btn("#ff4d6d"), padding: "2px 7px", zIndex: 2 }}
+                    onClick={e => { e.stopPropagation(); removeWatch(w.id); }}>✕</button>
+                  <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 4 }}>
                     <span style={{ fontWeight: 700, fontSize: 15, color: "#e0ecf8" }}>{w.ticker}</span>
                     <span style={s.badge(typeColor(w.type))}>{w.type.toUpperCase()}</span>
                   </div>
-                  <div style={{ fontSize: 18, fontWeight: 700, color: "#c8d6e5", marginBottom: 8 }}>
-                    {loading[w.ticker] ? <span style={{ color: "#334", fontSize: 12 }}>cargando…</span> : pd?.error ? <span style={{ color: "#ff4d6d", fontSize: 11 }}>sin datos</span> : pd?.price ? `$${fmt(pd.price)}` : "—"}
+                  <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 8 }}>
+                    <div style={{ fontSize: 18, fontWeight: 700, color: "#c8d6e5" }}>
+                      {loading[w.ticker] ? <span style={{ color: "#334", fontSize: 12 }}>cargando…</span> : pd?.error ? <span style={{ color: "#ff4d6d", fontSize: 11 }}>sin datos</span> : pd?.price ? `$${fmt(pd.price)}` : "—"}
+                    </div>
+                    {pd?.dayChange != null && (
+                      <span style={{ fontSize: 12, fontWeight: 700, color: clr(pd.dayChange) }}>
+                        {pd.dayChange >= 0 ? "+" : ""}{fmt(pd.dayChange, 2)}%
+                      </span>
+                    )}
                   </div>
-                  <div style={{ marginBottom: 6 }}><div style={{ fontSize: 9, color: "#445", marginBottom: 2 }}>RSI DIARIO</div><RSIBar value={pd?.rsiD} />{pd?.rsiD != null && (pd.rsiD < 35 || pd.rsiD > 65) && <div style={{ fontSize: 9, color: rsiColor(pd.rsiD), marginTop: 2 }}>{rsiLabel(pd.rsiD)}</div>}</div>
-                  <div style={{ marginBottom: 10 }}><div style={{ fontSize: 9, color: "#445", marginBottom: 2 }}>RSI SEMANAL</div><RSIBar value={pd?.rsiW} /></div>
-                  {w.tesis && <div style={{ fontSize: 10, color: "#556", borderTop: "1px solid #1a2535", paddingTop: 8 }}>{w.tesis}</div>}
+                  <div style={{ marginBottom: 6 }}>
+                    <div style={{ fontSize: 9, color: "#445", marginBottom: 2 }}>RSI DIARIO</div>
+                    <RSIBar value={pd?.rsiD} />
+                    {pd?.rsiD != null && (pd.rsiD < 35 || pd.rsiD > 65) && <div style={{ fontSize: 9, color: rsiColor(pd.rsiD), marginTop: 2 }}>{rsiLabel(pd.rsiD)}</div>}
+                  </div>
+                  <div style={{ marginBottom: w.tesis ? 10 : 0 }}>
+                    <div style={{ fontSize: 9, color: "#445", marginBottom: 2 }}>RSI SEMANAL</div>
+                    <RSIBar value={pd?.rsiW} />
+                  </div>
+                  {w.tesis && <div style={{ fontSize: 10, color: "#556", borderTop: "1px solid #1a2535", paddingTop: 8, marginTop: 8 }}>{w.tesis}</div>}
+                  <div style={{ fontSize: 9, color: "#334", marginTop: 8, textAlign: "right" }}>↗ TradingView</div>
                 </div>
               );
             })}
@@ -347,7 +427,7 @@ function App() {
           </div>
           {transactions.length === 0 && <div style={{ color: "#334", padding: 24, textAlign: "center", fontSize: 12 }}>Sin transacciones.</div>}
           <table style={s.table}>
-            <thead><tr>{["FECHA","ACCIÓN","TICKER","QTY","PRECIO","TOTAL","USD/CLP"].map(h => <th key={h} style={s.th}>{h}</th>)}</tr></thead>
+            <thead><tr>{["FECHA","ACCIÓN","TICKER","QTY","PRECIO","TOTAL","P&L REALIZADO","MONEDA"].map(h => <th key={h} style={s.th}>{h}</th>)}</tr></thead>
             <tbody>
               {transactions.map(tx => (
                 <tr key={tx.id}>
@@ -357,6 +437,7 @@ function App() {
                   <td style={s.td}>{fmt(tx.qty, 3)}</td>
                   <td style={s.td}>${fmt(tx.price)}</td>
                   <td style={s.td}>${fmt(tx.qty * tx.price)}</td>
+                  <td style={s.td}>{tx.realizedPnL != null ? <span style={{ color: clr(tx.realizedPnL), fontWeight: 700 }}>{tx.realizedPnL >= 0 ? "+" : ""}${fmt(tx.realizedPnL)}</span> : <span style={{ color: "#334" }}>—</span>}</td>
                   <td style={s.td}><span style={{ color: "#445", fontSize: 10 }}>{tx.currency}</span></td>
                 </tr>
               ))}
@@ -365,6 +446,39 @@ function App() {
         </>)}
       </div>
 
+      {/* SELL MODAL */}
+      {showSellModal && sellPos && (
+        <div style={s.modal} onClick={() => setShowSellModal(false)}>
+          <div style={s.mbox} onClick={e => e.stopPropagation()}>
+            <div style={{ fontWeight: 700, marginBottom: 14, letterSpacing: 2, color: "#ff4d6d" }}>CERRAR POSICIÓN — {sellPos.ticker}</div>
+            <div style={{ fontSize: 11, color: "#556", marginBottom: 16, lineHeight: 1.8 }}>
+              <div>Cantidad: <span style={{ color: "#c8d6e5" }}>{fmt(sellPos.qty, 3)}</span></div>
+              <div>Precio promedio: <span style={{ color: "#c8d6e5" }}>${fmt(sellPos.avgPrice)}</span></div>
+              <div>Costo total: <span style={{ color: "#c8d6e5" }}>${fmt(sellPos.avgPrice * sellPos.qty)}</span></div>
+            </div>
+            <div style={{ marginBottom: 14 }}>
+              <div style={s.label}>PRECIO DE VENTA</div>
+              <input style={s.input} value={sellPrice} type="number" placeholder="0.00"
+                onChange={e => setSellPrice(e.target.value)} autoFocus />
+              {sellPrice && !isNaN(parseFloat(sellPrice)) && (
+                <div style={{ marginTop: 8, fontSize: 12 }}>
+                  <span style={{ color: "#445" }}>P&L estimado: </span>
+                  <span style={{ color: clr((parseFloat(sellPrice) - sellPos.avgPrice) * sellPos.qty), fontWeight: 700 }}>
+                    {(parseFloat(sellPrice) - sellPos.avgPrice) * sellPos.qty >= 0 ? "+" : ""}
+                    ${fmt((parseFloat(sellPrice) - sellPos.avgPrice) * sellPos.qty)}
+                  </span>
+                </div>
+              )}
+            </div>
+            <div style={{ display: "flex", gap: 9 }}>
+              <button style={{ ...s.btn("#ff4d6d"), flex: 1, padding: "10px" }} onClick={confirmSell}>CONFIRMAR VENTA</button>
+              <button style={{ ...s.btn("#445"), flex: 1, padding: "10px" }} onClick={() => setShowSellModal(false)}>CANCELAR</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* IMPORT MODAL */}
       {showImportModal && (
         <div style={s.modal} onClick={() => setShowImportModal(false)}>
           <div style={{ ...s.mbox, width: 500 }} onClick={e => e.stopPropagation()}>
@@ -372,7 +486,6 @@ function App() {
               <span style={{ fontWeight: 700, letterSpacing: 2, color: "#a78bfa", fontSize: 12 }}>⬆ IMPORTAR JSON</span>
               <button style={{ ...s.btn("#445"), padding: "4px 10px" }} onClick={() => setShowImportModal(false)}>✕</button>
             </div>
-            <div style={{ fontSize: 11, color: "#556", marginBottom: 10 }}>Pegá el JSON del chat. Reemplaza todos los datos actuales.</div>
             <textarea value={importText} onChange={e => { setImportText(e.target.value); setImportError(""); }}
               placeholder='{ "positions": [...], "watchlist": [...] }'
               style={{ width: "100%", height: 240, background: "#060b10", border: `1px solid ${importError ? "#ff4d6d" : "#1e2d40"}`, borderRadius: 6, color: "#c8d6e5", fontSize: 10, fontFamily: ff, padding: 12, boxSizing: "border-box", resize: "none", lineHeight: 1.6 }} />
@@ -386,6 +499,7 @@ function App() {
         </div>
       )}
 
+      {/* EXPORT MODAL */}
       {showExportModal && (
         <div style={s.modal} onClick={() => setShowExportModal(false)}>
           <div style={{ ...s.mbox, width: 500 }} onClick={e => e.stopPropagation()}>
@@ -403,6 +517,7 @@ function App() {
         </div>
       )}
 
+      {/* ADD POSITION */}
       {showAddPos && (
         <div style={s.modal} onClick={() => setShowAddPos(false)}>
           <div style={s.mbox} onClick={e => e.stopPropagation()}>
@@ -425,6 +540,7 @@ function App() {
         </div>
       )}
 
+      {/* ADD WATCHLIST */}
       {showAddWatch && (
         <div style={s.modal} onClick={() => setShowAddWatch(false)}>
           <div style={s.mbox} onClick={e => e.stopPropagation()}>
@@ -440,10 +556,11 @@ function App() {
         </div>
       )}
 
+      {/* ADD TRANSACTION */}
       {showAddTx && (
         <div style={s.modal} onClick={() => setShowAddTx(false)}>
           <div style={s.mbox} onClick={e => e.stopPropagation()}>
-            <div style={{ fontWeight: 700, marginBottom: 14, letterSpacing: 2, color: "#00e5a0" }}>+ TRANSACCIÓN</div>
+            <div style={{ fontWeight: 700, marginBottom: 14, letterSpacing: 2, color: "#00e5a0" }}>+ TRANSACCIÓN MANUAL</div>
             {[{ label: "TICKER", key: "ticker", ph: "AAPL" }, { label: "FECHA", key: "date", type: "date" }, { label: "CANTIDAD", key: "qty", ph: "100", type: "number" }, { label: "PRECIO", key: "price", ph: "150.00", type: "number" }].map(f => (
               <div key={f.key} style={{ marginBottom: 9 }}><div style={s.label}>{f.label}</div><input style={s.input} value={newTx[f.key]} type={f.type || "text"} placeholder={f.ph} onChange={e => setNewTx(p => ({ ...p, [f.key]: e.target.value }))} /></div>
             ))}
