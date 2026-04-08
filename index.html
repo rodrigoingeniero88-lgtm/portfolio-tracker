@@ -7,14 +7,21 @@
   <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-  <style>* { box-sizing: border-box; margin: 0; padding: 0; } body { background: #080d14; }</style>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #080d14; }
+    .tv-link { cursor: pointer; }
+    .tv-link:hover { text-decoration: underline; color: #00e5a0 !important; }
+    .price-editable { cursor: pointer; border-bottom: 1px dashed #334; }
+    .price-editable:hover { border-bottom-color: #f0c040; color: #f0c040 !important; }
+  </style>
 </head>
 <body>
   <div id="root"></div>
   <script type="text/babel" data-presets="react">
-const { useState, useEffect, useCallback } = React;
+const { useState, useEffect, useCallback, useRef } = React;
 
-async function fetchYahooWithFallback(ticker, interval, range) {
+async function fetchYahoo(ticker, interval, range) {
   const res = await fetch(`/api/quote?ticker=${ticker}&interval=${interval}&range=${range}`,
     { signal: AbortSignal.timeout(10000) });
   if (!res.ok) throw new Error("API error");
@@ -23,11 +30,23 @@ async function fetchYahooWithFallback(ticker, interval, range) {
   if (!result) throw new Error("No data");
   const closes = result.indicators.quote[0].close.filter(Boolean);
   if (!closes.length) throw new Error("No closes");
-  const meta = result.meta;
-  const prevClose = meta.chartPreviousClose || meta.previousClose || closes[closes.length - 2] || closes[closes.length - 1];
   const lastPrice = closes[closes.length - 1];
-  const dayChange = prevClose ? ((lastPrice - prevClose) / prevClose) * 100 : null;
+  const prevPrice = closes.length > 1 ? closes[closes.length - 2] : lastPrice;
+  const dayChange = interval === "1d" ? ((lastPrice - prevPrice) / prevPrice) * 100 : null;
   return { closes, lastPrice, dayChange };
+}
+
+async function fetchUSDCLP() {
+  try {
+    const res = await fetch(`/api/quote?ticker=USDCLP%3DX&interval=1d&range=5d`,
+      { signal: AbortSignal.timeout(8000) });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const result = data?.chart?.result?.[0];
+    if (!result) return null;
+    const closes = result.indicators.quote[0].close.filter(Boolean);
+    return closes[closes.length - 1];
+  } catch { return null; }
 }
 
 function calcRSI(closes, period = 14) {
@@ -48,18 +67,25 @@ function calcRSI(closes, period = 14) {
 }
 
 const INITIAL_POSITIONS = [
-  { id: 1, ticker: "VITL", company: "Vital Farms", type: "largo", qty: 83.746, avgPrice: 13.02, currency: "USD", broker: "Fintual", status: "active", tesis: "Ventas +25% anual, sin deuda, castigada por problema contable ya resuelto. PO analistas $48. DCA." },
-  { id: 2, ticker: "LTM", company: "LATAM Airlines", type: "largo", qty: 40000, avgPrice: 22.23, currency: "CLP", broker: "Chile", status: "salida", tesis: "Posición en salida. No agregar ni promediar." },
-  { id: 3, ticker: "INVERCAP", company: "Invercap", type: "largo", qty: 300, avgPrice: 1928.6, currency: "CLP", broker: "Chile", status: "salida", tesis: "Posición en salida. No agregar ni promediar." },
+  { id: 1, ticker: "VITL", company: "Vital Farms", type: "largo", qty: 83.746, avgPrice: 13.02, currency: "USD", broker: "Fintual", status: "active", tesis: "Ventas +25% anual, sin deuda, castigada por problema contable ya resuelto. PO analistas $48. DCA.", nota: "" },
+  { id: 2, ticker: "LTM", company: "LATAM Airlines", type: "largo", qty: 40000, avgPrice: 22.23, currency: "CLP", broker: "Chile", status: "salida", tesis: "Posición en salida. No agregar ni promediar.", nota: "" },
+  { id: 3, ticker: "INVERCAP", company: "Invercap", type: "largo", qty: 300, avgPrice: 1928.6, currency: "CLP", broker: "Chile", status: "salida", tesis: "Posición en salida. No agregar ni promediar.", nota: "" },
+];
+
+const INITIAL_TRANSACTIONS = [
+  { id: 1, ticker: "LTM", date: "2025-11-19", action: "BUY", qty: 40000, price: 22.23, currency: "CLP", realizedPnL: null },
+  { id: 2, ticker: "VITL", date: "2026-03-30", action: "BUY", qty: 83.746, price: 13.02, currency: "USD", realizedPnL: null },
 ];
 
 const STOP_LOSS = { swing: 0.08, largo: 0.15 };
 const fmt = (n, dec = 2) => n == null ? "—" : n.toLocaleString("en-US", { minimumFractionDigits: dec, maximumFractionDigits: dec });
+const fmtCLP = (n) => n == null ? "—" : `$${Math.round(n).toLocaleString("es-CL")}`;
 const fmtPct = (n) => n == null ? "—" : `${n > 0 ? "+" : ""}${fmt(n)}%`;
 const clr = (n) => n == null ? "#8899aa" : n >= 0 ? "#00e5a0" : "#ff4d6d";
 const rsiColor = (r) => r == null ? "#8899aa" : r < 35 ? "#00e5a0" : r > 65 ? "#ff4d6d" : "#f0c040";
 const rsiLabel = (r) => r == null ? "" : r < 35 ? "SOBREVENDIDO" : r > 65 ? "SOBRECOMPRADO" : "NEUTRAL";
 const ff = "'IBM Plex Mono','Courier New',monospace";
+const openTV = (ticker) => window.open(`https://www.tradingview.com/chart/?symbol=${ticker}`, "tv_main_window");
 
 function RSIBar({ value }) {
   if (value == null) return <span style={{ color: "#556" }}>—</span>;
@@ -76,6 +102,24 @@ function RSIBar({ value }) {
   );
 }
 
+function NoteModal({ ticker, initialNote, onSave, onClose }) {
+  const [note, setNote] = useState(initialNote || "");
+  return (
+    <div style={{ position: "fixed", inset: 0, background: "#000c", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 200 }} onClick={onClose}>
+      <div style={{ background: "#0c1624", border: "1px solid #1e2d40", borderRadius: 10, padding: 24, width: 420, maxWidth: "95vw" }} onClick={e => e.stopPropagation()}>
+        <div style={{ fontWeight: 700, marginBottom: 12, letterSpacing: 2, color: "#f0c040", fontSize: 12 }}>📝 NOTA — {ticker}</div>
+        <textarea value={note} onChange={e => setNote(e.target.value)} autoFocus
+          placeholder="Escribí tus notas sobre esta posición..."
+          style={{ width: "100%", height: 160, background: "#060b10", border: "1px solid #1e2d40", borderRadius: 6, color: "#c8d6e5", fontSize: 12, fontFamily: ff, padding: 12, boxSizing: "border-box", resize: "none", lineHeight: 1.6 }} />
+        <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+          <button style={{ flex: 1, padding: "9px", background: "#f0c04018", color: "#f0c040", border: "1px solid #f0c04044", borderRadius: 4, cursor: "pointer", fontFamily: ff, fontWeight: 700, fontSize: 11 }} onClick={() => onSave(note)}>GUARDAR</button>
+          <button style={{ flex: 1, padding: "9px", background: "#44518", color: "#8899aa", border: "1px solid #33344", borderRadius: 4, cursor: "pointer", fontFamily: ff, fontWeight: 700, fontSize: 11 }} onClick={onClose}>CANCELAR</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function App() {
   const [tab, setTab] = useState("portfolio");
   const [positions, setPositions] = useState(() => {
@@ -85,13 +129,29 @@ function App() {
     try { return JSON.parse(localStorage.getItem("pt_watchlist")) || []; } catch { return []; }
   });
   const [transactions, setTransactions] = useState(() => {
-    try { return JSON.parse(localStorage.getItem("pt_transactions")) || []; } catch { return []; }
+    try {
+      const saved = JSON.parse(localStorage.getItem("pt_transactions"));
+      return saved && saved.length > 0 ? saved : INITIAL_TRANSACTIONS;
+    } catch { return INITIAL_TRANSACTIONS; }
+  });
+  const [manualPrices, setManualPrices] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("pt_manual")) || {}; } catch { return {}; }
   });
   const [priceData, setPriceData] = useState({});
+  const [usdClp, setUsdClp] = useState(null);
   const [loading, setLoading] = useState({});
   const [lastUpdate, setLastUpdate] = useState(null);
   const [alerts, setAlerts] = useState([]);
   const [fetchStatus, setFetchStatus] = useState("");
+
+  // Manual price editing
+  const [editingTicker, setEditingTicker] = useState(null);
+  const [editVal, setEditVal] = useState("");
+
+  // Note modal
+  const [noteModal, setNoteModal] = useState(null); // { ticker, type: 'position'|'watchlist', id }
+
+  // Modals
   const [showExportModal, setShowExportModal] = useState(false);
   const [exportText, setExportText] = useState("");
   const [copyLabel, setCopyLabel] = useState("📋 COPIAR");
@@ -105,30 +165,38 @@ function App() {
   const [showAddPos, setShowAddPos] = useState(false);
   const [showAddWatch, setShowAddWatch] = useState(false);
   const [showAddTx, setShowAddTx] = useState(false);
-  const [newPos, setNewPos] = useState({ ticker: "", company: "", type: "largo", qty: "", avgPrice: "", currency: "USD", broker: "IBKR", tesis: "" });
-  const [newWatch, setNewWatch] = useState({ ticker: "", type: "observación", tesis: "" });
+  const [newPos, setNewPos] = useState({ ticker: "", company: "", type: "largo", qty: "", avgPrice: "", currency: "USD", broker: "IBKR", tesis: "", nota: "" });
+  const [newWatch, setNewWatch] = useState({ ticker: "", type: "observación", tesis: "", nota: "" });
   const [newTx, setNewTx] = useState({ ticker: "", date: new Date().toISOString().split("T")[0], qty: "", price: "", action: "BUY", currency: "USD" });
 
   useEffect(() => { localStorage.setItem("pt_positions", JSON.stringify(positions)); }, [positions]);
   useEffect(() => { localStorage.setItem("pt_watchlist", JSON.stringify(watchlist)); }, [watchlist]);
   useEffect(() => { localStorage.setItem("pt_transactions", JSON.stringify(transactions)); }, [transactions]);
+  useEffect(() => { localStorage.setItem("pt_manual", JSON.stringify(manualPrices)); }, [manualPrices]);
 
   const fetchAll = useCallback(async () => {
-    const tickers = [...new Set([
+    const usdTickers = [...new Set([
       ...positions.filter(p => p.currency === "USD").map(p => p.ticker),
       ...watchlist.map(w => w.ticker),
     ])];
-    if (!tickers.length) return;
     setFetchStatus("Cargando...");
     const newAlerts = [];
     const updates = {};
     let loaded = 0;
-    await Promise.all(tickers.map(async (ticker) => {
+    const total = usdTickers.length + 1;
+
+    // Fetch USD/CLP
+    const rate = await fetchUSDCLP();
+    if (rate) setUsdClp(rate);
+    loaded++;
+    setFetchStatus(`Cargando... ${loaded}/${total}`);
+
+    await Promise.all(usdTickers.map(async (ticker) => {
       setLoading(l => ({ ...l, [ticker]: true }));
       try {
         const [daily, weekly] = await Promise.all([
-          fetchYahooWithFallback(ticker, "1d", "3mo"),
-          fetchYahooWithFallback(ticker, "1wk", "2y"),
+          fetchYahoo(ticker, "1d", "3mo"),
+          fetchYahoo(ticker, "1wk", "2y"),
         ]);
         const rsiD = calcRSI(daily.closes);
         const rsiW = calcRSI(weekly.closes);
@@ -139,9 +207,10 @@ function App() {
         updates[ticker] = { price: null, dayChange: null, rsiD: null, rsiW: null, error: true };
       }
       loaded++;
-      setFetchStatus(`Cargando... ${loaded}/${tickers.length}`);
+      setFetchStatus(`Cargando... ${loaded}/${total}`);
       setLoading(l => ({ ...l, [ticker]: false }));
     }));
+
     positions.forEach(p => {
       if (p.currency !== "USD") return;
       const pd = updates[p.ticker];
@@ -150,6 +219,7 @@ function App() {
       const sl = STOP_LOSS[p.type] || 0.08;
       if (pnlPct <= -sl) newAlerts.push({ ticker: p.ticker, type: "STOP LOSS", value: pnlPct * 100, label: `${p.type.toUpperCase()} — SL -${sl * 100}%` });
     });
+
     setPriceData(prev => ({ ...prev, ...updates }));
     setAlerts(newAlerts);
     setLastUpdate(new Date());
@@ -159,18 +229,42 @@ function App() {
 
   useEffect(() => { fetchAll(); }, []);
 
+  // ── USD Portfolio calculations ──
   const usdPositions = positions.filter(p => p.currency === "USD");
-  const totalCurrentUSD = usdPositions.reduce((acc, p) => {
+  const totalUSDCurrent = usdPositions.reduce((acc, p) => {
     const pd = priceData[p.ticker];
     return acc + (pd?.price ? pd.price * p.qty : p.avgPrice * p.qty);
   }, 0);
-  const totalCostUSD = usdPositions.reduce((acc, p) => acc + p.avgPrice * p.qty, 0);
-  const totalUnrealizedPnL = totalCurrentUSD - totalCostUSD;
-  const totalUnrealizedPct = totalCostUSD ? (totalUnrealizedPnL / totalCostUSD) * 100 : 0;
-  const totalRealizedPnL = transactions.filter(t => t.action === "SELL" && t.realizedPnL != null).reduce((acc, t) => acc + t.realizedPnL, 0);
+  const totalUSDCost = usdPositions.reduce((acc, p) => acc + p.avgPrice * p.qty, 0);
+  const totalUSDUnrealized = totalUSDCurrent - totalUSDCost;
+  const totalUSDUnrealizedPct = totalUSDCost ? (totalUSDUnrealized / totalUSDCost) * 100 : 0;
+
+  // ── CLP Portfolio calculations ──
+  const clpPositions = positions.filter(p => p.currency === "CLP");
+  const totalCLPCurrent = clpPositions.reduce((acc, p) => {
+    const manual = manualPrices[p.ticker];
+    return acc + (manual ? manual * p.qty : p.avgPrice * p.qty);
+  }, 0);
+  const totalCLPCost = clpPositions.reduce((acc, p) => acc + p.avgPrice * p.qty, 0);
+  const totalCLPUnrealized = totalCLPCurrent - totalCLPCost;
+  const totalCLPUnrealizedPct = totalCLPCost ? (totalCLPUnrealized / totalCLPCost) * 100 : 0;
+
+  // ── Realized PnL ──
+  const totalRealizedUSD = transactions.filter(t => t.action === "SELL" && t.realizedPnL != null && t.currency === "USD").reduce((acc, t) => acc + t.realizedPnL, 0);
+  const totalRealizedCLP = transactions.filter(t => t.action === "SELL" && t.realizedPnL != null && t.currency === "CLP").reduce((acc, t) => acc + t.realizedPnL, 0);
+
+  const saveNote = (note) => {
+    if (!noteModal) return;
+    if (noteModal.type === "position") {
+      setPositions(ps => ps.map(p => p.id === noteModal.id ? { ...p, nota: note } : p));
+    } else {
+      setWatchlist(ws => ws.map(w => w.id === noteModal.id ? { ...w, nota: note } : w));
+    }
+    setNoteModal(null);
+  };
 
   const exportJSON = () => {
-    const data = { exportedAt: new Date().toISOString(), positions, watchlist, transactions };
+    const data = { exportedAt: new Date().toISOString(), positions, watchlist, transactions, manualPrices };
     const json = JSON.stringify(data, null, 2);
     setExportText(json);
     setShowExportModal(true);
@@ -189,6 +283,7 @@ function App() {
       setPositions(data.positions);
       if (data.watchlist) setWatchlist(data.watchlist);
       if (data.transactions) setTransactions(data.transactions);
+      if (data.manualPrices) setManualPrices(data.manualPrices);
       setImportSuccess(true);
       setImportText("");
       setTimeout(() => { setShowImportModal(false); setImportSuccess(false); }, 1500);
@@ -197,16 +292,18 @@ function App() {
 
   const addPosition = () => {
     if (!newPos.ticker || !newPos.qty || !newPos.avgPrice) return;
-    const pos = { ...newPos, id: Date.now(), qty: +newPos.qty, avgPrice: +newPos.avgPrice, status: "active" };
+    const pos = { ...newPos, id: Date.now(), qty: +newPos.qty, avgPrice: +newPos.avgPrice, status: "active", nota: newPos.nota || "" };
     setPositions(p => [...p, pos]);
     setTransactions(t => [{ id: Date.now() + 1, ticker: pos.ticker, date: new Date().toISOString().split("T")[0], action: "BUY", qty: pos.qty, price: pos.avgPrice, currency: pos.currency, realizedPnL: null }, ...t]);
-    setNewPos({ ticker: "", company: "", type: "largo", qty: "", avgPrice: "", currency: "USD", broker: "IBKR", tesis: "" });
+    setNewPos({ ticker: "", company: "", type: "largo", qty: "", avgPrice: "", currency: "USD", broker: "IBKR", tesis: "", nota: "" });
     setShowAddPos(false);
   };
 
   const handleRemovePosition = (pos) => {
     setSellPos(pos);
-    setSellPrice(priceData[pos.ticker]?.price ? String(priceData[pos.ticker].price.toFixed(2)) : "");
+    const mp = manualPrices[pos.ticker];
+    const pd = priceData[pos.ticker];
+    setSellPrice(pos.currency === "CLP" ? (mp ? String(mp) : "") : (pd?.price ? String(pd.price.toFixed(2)) : ""));
     setShowSellModal(true);
   };
 
@@ -224,12 +321,11 @@ function App() {
 
   const addWatchlist = () => {
     if (!newWatch.ticker) return;
-    setWatchlist(w => [...w, { ...newWatch, id: Date.now(), ticker: newWatch.ticker.toUpperCase() }]);
-    setNewWatch({ ticker: "", type: "observación", tesis: "" });
+    setWatchlist(w => [...w, { ...newWatch, id: Date.now(), ticker: newWatch.ticker.toUpperCase(), nota: newWatch.nota || "" }]);
+    setNewWatch({ ticker: "", type: "observación", tesis: "", nota: "" });
     setShowAddWatch(false);
   };
   const removeWatch = (id) => setWatchlist(w => w.filter(x => x.id !== id));
-  const openTradingView = (ticker) => window.open(`https://www.tradingview.com/chart/?symbol=${ticker}`, "tradingview_window");
 
   const addTransaction = () => {
     if (!newTx.ticker || !newTx.qty || !newTx.price) return;
@@ -237,6 +333,8 @@ function App() {
     setNewTx({ ticker: "", date: new Date().toISOString().split("T")[0], qty: "", price: "", action: "BUY", currency: "USD" });
     setShowAddTx(false);
   };
+
+  const typeColor = (t) => t === "largo" ? "#5b9cf6" : t === "swing" ? "#f0c040" : "#8899aa";
 
   const s = {
     app: { fontFamily: ff, background: "#080d14", color: "#c8d6e5", minHeight: "100vh", paddingBottom: 60 },
@@ -255,25 +353,136 @@ function App() {
     modal: { position: "fixed", inset: 0, background: "#000c", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 100 },
     mbox: { background: "#0c1624", border: "1px solid #1e2d40", borderRadius: 10, padding: 24, width: 460, maxWidth: "95vw", maxHeight: "90vh", overflowY: "auto" },
     alertRow: (c) => ({ background: c + "18", border: `1px solid ${c}44`, borderRadius: 6, padding: "9px 14px", marginBottom: 7, display: "flex", alignItems: "center", justifyContent: "space-between" }),
+    sectionHeader: { fontSize: 11, letterSpacing: 3, color: "#445", marginBottom: 10, marginTop: 20, paddingBottom: 6, borderBottom: "1px solid #1a2535", display: "flex", alignItems: "center", gap: 10 },
   };
-  const typeColor = (t) => t === "largo" ? "#5b9cf6" : t === "swing" ? "#f0c040" : "#8899aa";
+
+  const renderPositionTable = (posList, isCLP) => (
+    <div style={{ overflowX: "auto", marginBottom: 20 }}>
+      <table style={s.table}>
+        <thead>
+          <tr>{["TICKER", "TIPO", "QTY", "PROM", "PRECIO", "VALOR", "PESO%", "P&L", "P&L%", isCLP ? "" : "DIST SL", isCLP ? "" : "RSI D", isCLP ? "" : "RSI W", "NOTA", ""].map((h, i) => <th key={i} style={s.th}>{h}</th>)}</tr>
+        </thead>
+        <tbody>
+          {posList.map(pos => {
+            const pd = priceData[pos.ticker];
+            const manualPrice = manualPrices[pos.ticker];
+            const price = isCLP ? manualPrice : pd?.price;
+            const totalCurrent = isCLP ? (price ? price * pos.qty : null) : (price ? price * pos.qty : null);
+            const cost = pos.avgPrice * pos.qty;
+            const pnl = totalCurrent != null ? totalCurrent - cost : null;
+            const pnlPct = pnl != null ? (pnl / cost) * 100 : null;
+            const sl = STOP_LOSS[pos.type] || 0.08;
+            const distToSL = pnlPct != null ? (pnlPct - (-sl * 100)) : null;
+            const nearSL = distToSL != null && distToSL < sl * 100 * 0.3;
+            const totalPool = isCLP ? totalCLPCurrent : totalUSDCurrent;
+            const peso = totalCurrent != null && totalPool > 0 ? (totalCurrent / totalPool) * 100 : null;
+            const hasNote = pos.nota && pos.nota.trim().length > 0;
+
+            return (
+              <tr key={pos.id} style={{ opacity: pos.status === "salida" ? 0.6 : 1, background: nearSL ? "#ff4d6d07" : "transparent" }}>
+                <td style={s.td}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    {isCLP ? (
+                      <span style={{ fontWeight: 700, color: "#e0ecf8" }}>{pos.ticker}</span>
+                    ) : (
+                      <span className="tv-link" style={{ fontWeight: 700, color: "#e0ecf8" }} onClick={() => openTV(pos.ticker)}>{pos.ticker} ↗</span>
+                    )}
+                  </div>
+                  <div style={{ fontSize: 9, color: "#445" }}>{pos.company}</div>
+                  {pos.status === "salida" && <div style={{ fontSize: 9, color: "#ff4d6d" }}>EN SALIDA</div>}
+                </td>
+                <td style={s.td}><span style={s.badge(typeColor(pos.type))}>{pos.type.toUpperCase()}</span></td>
+                <td style={s.td}>{fmt(pos.qty, pos.qty % 1 === 0 ? 0 : 3)}</td>
+                <td style={s.td}>{isCLP ? fmtCLP(pos.avgPrice) : `$${fmt(pos.avgPrice)}`} <span style={{ fontSize: 9, color: "#445" }}>{pos.currency}</span></td>
+                <td style={s.td}>
+                  {isCLP ? (
+                    editingTicker === pos.ticker ? (
+                      <input
+                        autoFocus
+                        type="number"
+                        value={editVal}
+                        onChange={e => setEditVal(e.target.value)}
+                        onBlur={() => {
+                          const v = parseFloat(editVal);
+                          if (!isNaN(v)) setManualPrices(mp => ({ ...mp, [pos.ticker]: v }));
+                          setEditingTicker(null);
+                        }}
+                        onKeyDown={e => {
+                          if (e.key === "Enter") {
+                            const v = parseFloat(editVal);
+                            if (!isNaN(v)) setManualPrices(mp => ({ ...mp, [pos.ticker]: v }));
+                            setEditingTicker(null);
+                          }
+                          if (e.key === "Escape") setEditingTicker(null);
+                        }}
+                        style={{ ...s.input, width: 100, padding: "3px 6px", fontSize: 11 }}
+                      />
+                    ) : (
+                      <span className="price-editable" style={{ color: manualPrice ? "#c8d6e5" : "#445", fontSize: 12 }}
+                        onClick={() => { setEditingTicker(pos.ticker); setEditVal(manualPrice ? String(manualPrice) : ""); }}>
+                        {manualPrice ? fmtCLP(manualPrice) : "click p/ ingresar"}
+                      </span>
+                    )
+                  ) : (
+                    loading[pos.ticker] ? <span style={{ color: "#334" }}>…</span> :
+                    price ? `$${fmt(price)}` : pd?.error ? <span style={{ fontSize: 9, color: "#ff4d6d" }}>ERR</span> : "—"
+                  )}
+                </td>
+                <td style={s.td}>{totalCurrent ? (isCLP ? fmtCLP(totalCurrent) : `$${fmt(totalCurrent)}`) : "—"}</td>
+                <td style={s.td}><span style={{ color: "#8899aa" }}>{peso != null ? `${fmt(peso, 1)}%` : "—"}</span></td>
+                <td style={s.td}><span style={{ color: clr(pnl) }}>{pnl != null ? `${pnl >= 0 ? "+" : ""}${isCLP ? fmtCLP(pnl) : `$${fmt(pnl)}`}` : "—"}</span></td>
+                <td style={s.td}><span style={{ color: clr(pnlPct) }}>{fmtPct(pnlPct)}</span></td>
+                {isCLP ? <td style={s.td}>—</td> : (
+                  <td style={s.td}>
+                    {distToSL != null ? (
+                      <span style={{ color: distToSL < 3 ? "#ff4d6d" : distToSL < 8 ? "#f0c040" : "#556", fontSize: 11, fontWeight: distToSL < 3 ? 700 : 400 }}>
+                        {distToSL > 0 ? `${fmt(distToSL, 1)}%` : "⚠ SL"}
+                      </span>
+                    ) : "—"}
+                  </td>
+                )}
+                {isCLP ? <td style={s.td}>—</td> : <td style={s.td}><RSIBar value={pd?.rsiD} /></td>}
+                {isCLP ? <td style={s.td}>—</td> : <td style={s.td}><RSIBar value={pd?.rsiW} /></td>}
+                <td style={s.td}>
+                  <button onClick={() => setNoteModal({ ticker: pos.ticker, type: "position", id: pos.id, note: pos.nota || "" })}
+                    style={{ ...s.btn(hasNote ? "#f0c040" : "#445"), padding: "2px 7px", fontSize: 10 }} title={hasNote ? pos.nota : "Agregar nota"}>
+                    {hasNote ? "📝" : "＋"}
+                  </button>
+                </td>
+                <td style={s.td}><button style={{ ...s.btn("#ff4d6d"), padding: "2px 7px" }} onClick={() => handleRemovePosition(pos)}>✕</button></td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
 
   return (
     <div style={s.app}>
+      {/* Header */}
       <div style={s.header}>
         <div>
           <div style={{ fontSize: 16, fontWeight: 700, letterSpacing: 3, color: "#00e5a0" }}>◈ PORTFOLIO TRACKER</div>
-          <div style={{ fontSize: 10, color: "#445", letterSpacing: 2 }}>IBKR · FINTUAL · CHILE</div>
+          <div style={{ fontSize: 10, color: "#445", letterSpacing: 2 }}>
+            IBKR · FINTUAL · CHILE
+            {usdClp && <span style={{ marginLeft: 12, color: "#334" }}>USD/CLP {fmt(usdClp, 0)}</span>}
+          </div>
         </div>
         <div style={{ textAlign: "right" }}>
-          <div style={{ display: "flex", gap: 20, justifyContent: "flex-end", marginBottom: 6 }}>
+          <div style={{ display: "flex", gap: 20, justifyContent: "flex-end", marginBottom: 6, flexWrap: "wrap" }}>
             <div>
-              <div style={{ fontSize: 9, color: "#445", letterSpacing: 1 }}>NO REALIZADO</div>
-              <div style={{ color: clr(totalUnrealizedPnL), fontSize: 16, fontWeight: 700 }}>{totalUnrealizedPnL >= 0 ? "+" : ""}${fmt(totalUnrealizedPnL)} <span style={{ fontSize: 11 }}>({fmtPct(totalUnrealizedPct)})</span></div>
+              <div style={{ fontSize: 9, color: "#5b9cf6", letterSpacing: 1 }}>▸ USD — NO REALIZADO</div>
+              <div style={{ color: clr(totalUSDUnrealized), fontSize: 15, fontWeight: 700 }}>{totalUSDUnrealized >= 0 ? "+" : ""}${fmt(totalUSDUnrealized)} <span style={{ fontSize: 10 }}>({fmtPct(totalUSDUnrealizedPct)})</span></div>
             </div>
             <div>
-              <div style={{ fontSize: 9, color: "#445", letterSpacing: 1 }}>REALIZADO</div>
-              <div style={{ color: clr(totalRealizedPnL), fontSize: 16, fontWeight: 700 }}>{totalRealizedPnL >= 0 ? "+" : ""}${fmt(totalRealizedPnL)}</div>
+              <div style={{ fontSize: 9, color: "#f0c040", letterSpacing: 1 }}>▸ CLP — NO REALIZADO</div>
+              <div style={{ color: clr(totalCLPUnrealized), fontSize: 15, fontWeight: 700 }}>{totalCLPUnrealized >= 0 ? "+" : ""}{fmtCLP(totalCLPUnrealized)} <span style={{ fontSize: 10 }}>({fmtPct(totalCLPUnrealizedPct)})</span></div>
+            </div>
+            <div>
+              <div style={{ fontSize: 9, color: "#00e5a0", letterSpacing: 1 }}>▸ REALIZADO</div>
+              <div style={{ color: clr(totalRealizedUSD), fontSize: 13, fontWeight: 700 }}>USD {totalRealizedUSD >= 0 ? "+" : ""}${fmt(totalRealizedUSD)}</div>
+              <div style={{ color: clr(totalRealizedCLP), fontSize: 13, fontWeight: 700 }}>CLP {totalRealizedCLP >= 0 ? "+" : ""}{fmtCLP(totalRealizedCLP)}</div>
             </div>
           </div>
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
@@ -285,6 +494,7 @@ function App() {
         </div>
       </div>
 
+      {/* Alerts */}
       {alerts.length > 0 && (
         <div style={{ padding: "10px 20px 0" }}>
           {alerts.map((a, i) => {
@@ -297,6 +507,7 @@ function App() {
         </div>
       )}
 
+      {/* Tabs */}
       <div style={s.tabs}>
         {["portfolio", "watchlist", "transacciones"].map(t => (
           <button key={t} style={s.tab(tab === t)} onClick={() => setTab(t)}>{t.toUpperCase()}</button>
@@ -305,13 +516,15 @@ function App() {
 
       <div style={{ padding: "18px 20px" }}>
 
+        {/* ── PORTFOLIO ── */}
         {tab === "portfolio" && (<>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 10, marginBottom: 14 }}>
+          {/* USD Summary */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 10, marginBottom: 6 }}>
             {[
-              { label: "VALOR USD", val: `$${fmt(totalCurrentUSD)}`, c: "#c8d6e5" },
-              { label: "P&L NO REALIZADO", val: `${totalUnrealizedPnL >= 0 ? "+" : ""}$${fmt(totalUnrealizedPnL)}`, c: clr(totalUnrealizedPnL) },
-              { label: "P&L %", val: fmtPct(totalUnrealizedPct), c: clr(totalUnrealizedPct) },
-              { label: "P&L REALIZADO", val: `${totalRealizedPnL >= 0 ? "+" : ""}$${fmt(totalRealizedPnL)}`, c: clr(totalRealizedPnL) },
+              { label: "VALOR USD", val: `$${fmt(totalUSDCurrent)}`, c: "#5b9cf6" },
+              { label: "P&L USD", val: `${totalUSDUnrealized >= 0 ? "+" : ""}$${fmt(totalUSDUnrealized)}`, c: clr(totalUSDUnrealized) },
+              { label: "P&L USD %", val: fmtPct(totalUSDUnrealizedPct), c: clr(totalUSDUnrealizedPct) },
+              { label: "REALIZADO USD", val: `${totalRealizedUSD >= 0 ? "+" : ""}$${fmt(totalRealizedUSD)}`, c: clr(totalRealizedUSD) },
             ].map(item => (
               <div key={item.label} style={s.card}>
                 <div style={s.label}>{item.label}</div>
@@ -319,76 +532,66 @@ function App() {
               </div>
             ))}
           </div>
+          {/* CLP Summary */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 10, marginBottom: 14 }}>
+            {[
+              { label: "VALOR CLP", val: fmtCLP(totalCLPCurrent), c: "#f0c040" },
+              { label: "P&L CLP", val: `${totalCLPUnrealized >= 0 ? "+" : ""}${fmtCLP(totalCLPUnrealized)}`, c: clr(totalCLPUnrealized) },
+              { label: "P&L CLP %", val: fmtPct(totalCLPUnrealizedPct), c: clr(totalCLPUnrealizedPct) },
+              { label: "REALIZADO CLP", val: `${totalRealizedCLP >= 0 ? "+" : ""}${fmtCLP(totalRealizedCLP)}`, c: clr(totalRealizedCLP) },
+            ].map(item => (
+              <div key={item.label} style={s.card}>
+                <div style={s.label}>{item.label}</div>
+                <div style={s.val(item.c)}>{item.val}</div>
+              </div>
+            ))}
+          </div>
+
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
             <span style={{ fontSize: 10, letterSpacing: 2, color: "#445" }}>POSICIONES</span>
             <button style={s.btn()} onClick={() => setShowAddPos(true)}>+ AGREGAR</button>
           </div>
-          <div style={{ overflowX: "auto" }}>
-            <table style={s.table}>
-              <thead>
-                <tr>{["TICKER","TIPO","QTY","PROM","PRECIO","VALOR","PESO%","P&L","P&L%","DIST SL","RSI D","RSI W",""].map(h => <th key={h} style={s.th}>{h}</th>)}</tr>
-              </thead>
-              <tbody>
-                {positions.map(pos => {
-                  const pd = priceData[pos.ticker];
-                  const price = pd?.price;
-                  const valor = price ? price * pos.qty : null;
-                  const cost = pos.avgPrice * pos.qty;
-                  const pnl = valor != null ? valor - cost : null;
-                  const pnlPct = pnl != null ? (pnl / cost) * 100 : null;
-                  const sl = STOP_LOSS[pos.type] || 0.08;
-                  const distToSL = pnlPct != null ? (pnlPct - (-sl * 100)) : null;
-                  const nearSL = distToSL != null && distToSL < sl * 100 * 0.3;
-                  const peso = valor != null && totalCurrentUSD > 0 ? (valor / totalCurrentUSD) * 100 : null;
-                  return (
-                    <tr key={pos.id} style={{ opacity: pos.status === "salida" ? 0.55 : 1, background: nearSL ? "#ff4d6d07" : "transparent" }}>
-                      <td style={s.td}>
-                        <div style={{ fontWeight: 700, color: "#e0ecf8" }}>{pos.ticker}</div>
-                        <div style={{ fontSize: 9, color: "#445" }}>{pos.company}</div>
-                        {pos.status === "salida" && <div style={{ fontSize: 9, color: "#ff4d6d" }}>EN SALIDA</div>}
-                      </td>
-                      <td style={s.td}><span style={s.badge(typeColor(pos.type))}>{pos.type.toUpperCase()}</span></td>
-                      <td style={s.td}>{fmt(pos.qty, pos.qty % 1 === 0 ? 0 : 3)}</td>
-                      <td style={s.td}>{fmt(pos.avgPrice)} <span style={{ fontSize: 9, color: "#445" }}>{pos.currency}</span></td>
-                      <td style={s.td}>{loading[pos.ticker] ? <span style={{ color: "#334" }}>…</span> : price ? `$${fmt(price)}` : pd?.error ? <span style={{ fontSize: 9, color: "#ff4d6d" }}>ERR</span> : "—"}</td>
-                      <td style={s.td}>{valor ? `$${fmt(valor)}` : "—"}</td>
-                      <td style={s.td}><span style={{ color: "#8899aa" }}>{peso != null ? `${fmt(peso, 1)}%` : "—"}</span></td>
-                      <td style={s.td}><span style={{ color: clr(pnl) }}>{pnl != null ? `${pnl >= 0 ? "+" : ""}$${fmt(pnl)}` : "—"}</span></td>
-                      <td style={s.td}><span style={{ color: clr(pnlPct) }}>{fmtPct(pnlPct)}</span></td>
-                      <td style={s.td}>
-                        {distToSL != null && pos.currency === "USD" ? (
-                          <span style={{ color: distToSL < 3 ? "#ff4d6d" : distToSL < 8 ? "#f0c040" : "#556", fontSize: 11, fontWeight: distToSL < 3 ? 700 : 400 }}>
-                            {distToSL > 0 ? `${fmt(distToSL, 1)}%` : "⚠ SL"}
-                          </span>
-                        ) : "—"}
-                      </td>
-                      <td style={s.td}><RSIBar value={pd?.rsiD} /></td>
-                      <td style={s.td}><RSIBar value={pd?.rsiW} /></td>
-                      <td style={s.td}><button style={{ ...s.btn("#ff4d6d"), padding: "2px 7px" }} onClick={() => handleRemovePosition(pos)}>✕</button></td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+
+          {usdPositions.length > 0 && (<>
+            <div style={s.sectionHeader}>
+              <span style={{ color: "#5b9cf6" }}>● USD</span>
+              <span style={{ fontSize: 10, color: "#334" }}>click en ticker → TradingView</span>
+            </div>
+            {renderPositionTable(usdPositions, false)}
+          </>)}
+
+          {clpPositions.length > 0 && (<>
+            <div style={s.sectionHeader}>
+              <span style={{ color: "#f0c040" }}>● CLP</span>
+              <span style={{ fontSize: 10, color: "#334" }}>click en precio → ingresar manualmente</span>
+            </div>
+            {renderPositionTable(clpPositions, true)}
+          </>)}
         </>)}
 
+        {/* ── WATCHLIST ── */}
         {tab === "watchlist" && (<>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-            <span style={{ fontSize: 10, letterSpacing: 2, color: "#445" }}>WATCHLIST · click abre TradingView</span>
+            <span style={{ fontSize: 10, letterSpacing: 2, color: "#445" }}>WATCHLIST · click tarjeta → TradingView</span>
             <button style={s.btn()} onClick={() => setShowAddWatch(true)}>+ AGREGAR</button>
           </div>
           {watchlist.length === 0 && <div style={{ color: "#334", padding: 24, textAlign: "center", fontSize: 12 }}>Watchlist vacío.</div>}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(260px,1fr))", gap: 12 }}>
             {watchlist.map(w => {
               const pd = priceData[w.ticker];
+              const hasNote = w.nota && w.nota.trim().length > 0;
               return (
                 <div key={w.id} style={{ ...s.card, position: "relative", cursor: "pointer", transition: "border-color 0.2s" }}
-                  onClick={() => openTradingView(w.ticker)}
+                  onClick={() => openTV(w.ticker)}
                   onMouseEnter={e => e.currentTarget.style.borderColor = "#00e5a044"}
                   onMouseLeave={e => e.currentTarget.style.borderColor = "#1a2535"}>
-                  <button style={{ position: "absolute", top: 10, right: 10, ...s.btn("#ff4d6d"), padding: "2px 7px", zIndex: 2 }}
-                    onClick={e => { e.stopPropagation(); removeWatch(w.id); }}>✕</button>
+                  <div style={{ position: "absolute", top: 10, right: 10, display: "flex", gap: 5 }}>
+                    <button style={{ ...s.btn(hasNote ? "#f0c040" : "#445"), padding: "2px 6px", fontSize: 10, zIndex: 2 }}
+                      onClick={e => { e.stopPropagation(); setNoteModal({ ticker: w.ticker, type: "watchlist", id: w.id, note: w.nota || "" }); }}
+                      title={hasNote ? w.nota : "Agregar nota"}>📝</button>
+                    <button style={{ ...s.btn("#ff4d6d"), padding: "2px 7px", zIndex: 2 }}
+                      onClick={e => { e.stopPropagation(); removeWatch(w.id); }}>✕</button>
+                  </div>
                   <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginBottom: 4 }}>
                     <span style={{ fontWeight: 700, fontSize: 15, color: "#e0ecf8" }}>{w.ticker}</span>
                     <span style={s.badge(typeColor(w.type))}>{w.type.toUpperCase()}</span>
@@ -408,11 +611,12 @@ function App() {
                     <RSIBar value={pd?.rsiD} />
                     {pd?.rsiD != null && (pd.rsiD < 35 || pd.rsiD > 65) && <div style={{ fontSize: 9, color: rsiColor(pd.rsiD), marginTop: 2 }}>{rsiLabel(pd.rsiD)}</div>}
                   </div>
-                  <div style={{ marginBottom: w.tesis ? 10 : 0 }}>
+                  <div style={{ marginBottom: (w.tesis || hasNote) ? 10 : 0 }}>
                     <div style={{ fontSize: 9, color: "#445", marginBottom: 2 }}>RSI SEMANAL</div>
                     <RSIBar value={pd?.rsiW} />
                   </div>
                   {w.tesis && <div style={{ fontSize: 10, color: "#556", borderTop: "1px solid #1a2535", paddingTop: 8, marginTop: 8 }}>{w.tesis}</div>}
+                  {hasNote && <div style={{ fontSize: 10, color: "#f0c04099", marginTop: 6 }}>📝 {w.nota}</div>}
                   <div style={{ fontSize: 9, color: "#334", marginTop: 8, textAlign: "right" }}>↗ TradingView</div>
                 </div>
               );
@@ -420,6 +624,7 @@ function App() {
           </div>
         </>)}
 
+        {/* ── TRANSACCIONES ── */}
         {tab === "transacciones" && (<>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
             <span style={{ fontSize: 10, letterSpacing: 2, color: "#445" }}>TRANSACCIONES</span>
@@ -435,9 +640,9 @@ function App() {
                   <td style={s.td}><span style={s.badge(tx.action === "BUY" ? "#00e5a0" : "#ff4d6d")}>{tx.action}</span></td>
                   <td style={{ ...s.td, fontWeight: 700, color: "#e0ecf8" }}>{tx.ticker}</td>
                   <td style={s.td}>{fmt(tx.qty, 3)}</td>
-                  <td style={s.td}>${fmt(tx.price)}</td>
-                  <td style={s.td}>${fmt(tx.qty * tx.price)}</td>
-                  <td style={s.td}>{tx.realizedPnL != null ? <span style={{ color: clr(tx.realizedPnL), fontWeight: 700 }}>{tx.realizedPnL >= 0 ? "+" : ""}${fmt(tx.realizedPnL)}</span> : <span style={{ color: "#334" }}>—</span>}</td>
+                  <td style={s.td}>{tx.currency === "CLP" ? fmtCLP(tx.price) : `$${fmt(tx.price)}`}</td>
+                  <td style={s.td}>{tx.currency === "CLP" ? fmtCLP(tx.qty * tx.price) : `$${fmt(tx.qty * tx.price)}`}</td>
+                  <td style={s.td}>{tx.realizedPnL != null ? <span style={{ color: clr(tx.realizedPnL), fontWeight: 700 }}>{tx.realizedPnL >= 0 ? "+" : ""}{tx.currency === "CLP" ? fmtCLP(tx.realizedPnL) : `$${fmt(tx.realizedPnL)}`}</span> : <span style={{ color: "#334" }}>—</span>}</td>
                   <td style={s.td}><span style={{ color: "#445", fontSize: 10 }}>{tx.currency}</span></td>
                 </tr>
               ))}
@@ -446,6 +651,16 @@ function App() {
         </>)}
       </div>
 
+      {/* NOTE MODAL */}
+      {noteModal && (
+        <NoteModal
+          ticker={noteModal.ticker}
+          initialNote={noteModal.note}
+          onSave={saveNote}
+          onClose={() => setNoteModal(null)}
+        />
+      )}
+
       {/* SELL MODAL */}
       {showSellModal && sellPos && (
         <div style={s.modal} onClick={() => setShowSellModal(false)}>
@@ -453,11 +668,11 @@ function App() {
             <div style={{ fontWeight: 700, marginBottom: 14, letterSpacing: 2, color: "#ff4d6d" }}>CERRAR POSICIÓN — {sellPos.ticker}</div>
             <div style={{ fontSize: 11, color: "#556", marginBottom: 16, lineHeight: 1.8 }}>
               <div>Cantidad: <span style={{ color: "#c8d6e5" }}>{fmt(sellPos.qty, 3)}</span></div>
-              <div>Precio promedio: <span style={{ color: "#c8d6e5" }}>${fmt(sellPos.avgPrice)}</span></div>
-              <div>Costo total: <span style={{ color: "#c8d6e5" }}>${fmt(sellPos.avgPrice * sellPos.qty)}</span></div>
+              <div>Precio promedio: <span style={{ color: "#c8d6e5" }}>{sellPos.currency === "CLP" ? fmtCLP(sellPos.avgPrice) : `$${fmt(sellPos.avgPrice)}`}</span></div>
+              <div>Costo total: <span style={{ color: "#c8d6e5" }}>{sellPos.currency === "CLP" ? fmtCLP(sellPos.avgPrice * sellPos.qty) : `$${fmt(sellPos.avgPrice * sellPos.qty)}`}</span></div>
             </div>
             <div style={{ marginBottom: 14 }}>
-              <div style={s.label}>PRECIO DE VENTA</div>
+              <div style={s.label}>PRECIO DE VENTA ({sellPos.currency})</div>
               <input style={s.input} value={sellPrice} type="number" placeholder="0.00"
                 onChange={e => setSellPrice(e.target.value)} autoFocus />
               {sellPrice && !isNaN(parseFloat(sellPrice)) && (
@@ -465,7 +680,7 @@ function App() {
                   <span style={{ color: "#445" }}>P&L estimado: </span>
                   <span style={{ color: clr((parseFloat(sellPrice) - sellPos.avgPrice) * sellPos.qty), fontWeight: 700 }}>
                     {(parseFloat(sellPrice) - sellPos.avgPrice) * sellPos.qty >= 0 ? "+" : ""}
-                    ${fmt((parseFloat(sellPrice) - sellPos.avgPrice) * sellPos.qty)}
+                    {sellPos.currency === "CLP" ? fmtCLP((parseFloat(sellPrice) - sellPos.avgPrice) * sellPos.qty) : `$${fmt((parseFloat(sellPrice) - sellPos.avgPrice) * sellPos.qty)}`}
                   </span>
                 </div>
               )}
@@ -522,7 +737,7 @@ function App() {
         <div style={s.modal} onClick={() => setShowAddPos(false)}>
           <div style={s.mbox} onClick={e => e.stopPropagation()}>
             <div style={{ fontWeight: 700, marginBottom: 14, letterSpacing: 2, color: "#00e5a0" }}>+ NUEVA POSICIÓN</div>
-            {[{ label: "TICKER", key: "ticker", ph: "AAPL" }, { label: "EMPRESA", key: "company", ph: "Apple Inc." }, { label: "CANTIDAD", key: "qty", ph: "100", type: "number" }, { label: "PRECIO PROMEDIO", key: "avgPrice", ph: "150.00", type: "number" }, { label: "BROKER", key: "broker", ph: "IBKR" }, { label: "TESIS", key: "tesis", ph: "Razón..." }].map(f => (
+            {[{ label: "TICKER", key: "ticker", ph: "AAPL" }, { label: "EMPRESA", key: "company", ph: "Apple Inc." }, { label: "CANTIDAD", key: "qty", ph: "100", type: "number" }, { label: "PRECIO PROMEDIO", key: "avgPrice", ph: "150.00", type: "number" }, { label: "BROKER", key: "broker", ph: "IBKR" }, { label: "TESIS", key: "tesis", ph: "Razón..." }, { label: "NOTA INICIAL", key: "nota", ph: "Notas..." }].map(f => (
               <div key={f.key} style={{ marginBottom: 9 }}>
                 <div style={s.label}>{f.label}</div>
                 <input style={s.input} value={newPos[f.key]} type={f.type || "text"} placeholder={f.ph} onChange={e => setNewPos(p => ({ ...p, [f.key]: e.target.value }))} />
@@ -545,9 +760,18 @@ function App() {
         <div style={s.modal} onClick={() => setShowAddWatch(false)}>
           <div style={s.mbox} onClick={e => e.stopPropagation()}>
             <div style={{ fontWeight: 700, marginBottom: 14, letterSpacing: 2, color: "#00e5a0" }}>+ WATCHLIST</div>
-            <div style={{ marginBottom: 9 }}><div style={s.label}>TICKER</div><input style={s.input} value={newWatch.ticker} placeholder="MSFT" onChange={e => setNewWatch(p => ({ ...p, ticker: e.target.value.toUpperCase() }))} /></div>
-            <div style={{ marginBottom: 9 }}><div style={s.label}>TIPO</div><select style={s.input} value={newWatch.type} onChange={e => setNewWatch(p => ({ ...p, type: e.target.value }))}><option value="observación">Observación</option><option value="swing">Swing</option><option value="largo">Largo plazo</option></select></div>
-            <div style={{ marginBottom: 14 }}><div style={s.label}>TESIS</div><input style={s.input} value={newWatch.tesis} placeholder="Razón..." onChange={e => setNewWatch(p => ({ ...p, tesis: e.target.value }))} /></div>
+            {[{ label: "TICKER", key: "ticker", ph: "MSFT" }, { label: "TESIS", key: "tesis", ph: "Razón de seguimiento..." }, { label: "NOTA", key: "nota", ph: "Notas adicionales..." }].map(f => (
+              <div key={f.key} style={{ marginBottom: 9 }}>
+                <div style={s.label}>{f.label}</div>
+                <input style={s.input} value={newWatch[f.key]} placeholder={f.ph}
+                  onChange={e => setNewWatch(p => ({ ...p, [f.key]: f.key === "ticker" ? e.target.value.toUpperCase() : e.target.value }))} />
+              </div>
+            ))}
+            <div style={{ marginBottom: 14 }}><div style={s.label}>TIPO</div>
+              <select style={s.input} value={newWatch.type} onChange={e => setNewWatch(p => ({ ...p, type: e.target.value }))}>
+                <option value="observación">Observación</option><option value="swing">Swing</option><option value="largo">Largo plazo</option>
+              </select>
+            </div>
             <div style={{ display: "flex", gap: 9 }}>
               <button style={{ ...s.btn(), flex: 1, padding: "10px" }} onClick={addWatchlist}>AGREGAR</button>
               <button style={{ ...s.btn("#445"), flex: 1, padding: "10px" }} onClick={() => setShowAddWatch(false)}>CANCELAR</button>
@@ -562,7 +786,9 @@ function App() {
           <div style={s.mbox} onClick={e => e.stopPropagation()}>
             <div style={{ fontWeight: 700, marginBottom: 14, letterSpacing: 2, color: "#00e5a0" }}>+ TRANSACCIÓN MANUAL</div>
             {[{ label: "TICKER", key: "ticker", ph: "AAPL" }, { label: "FECHA", key: "date", type: "date" }, { label: "CANTIDAD", key: "qty", ph: "100", type: "number" }, { label: "PRECIO", key: "price", ph: "150.00", type: "number" }].map(f => (
-              <div key={f.key} style={{ marginBottom: 9 }}><div style={s.label}>{f.label}</div><input style={s.input} value={newTx[f.key]} type={f.type || "text"} placeholder={f.ph} onChange={e => setNewTx(p => ({ ...p, [f.key]: e.target.value }))} /></div>
+              <div key={f.key} style={{ marginBottom: 9 }}><div style={s.label}>{f.label}</div>
+                <input style={s.input} value={newTx[f.key]} type={f.type || "text"} placeholder={f.ph} onChange={e => setNewTx(p => ({ ...p, [f.key]: e.target.value }))} />
+              </div>
             ))}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 9, marginBottom: 14 }}>
               <div><div style={s.label}>ACCIÓN</div><select style={s.input} value={newTx.action} onChange={e => setNewTx(p => ({ ...p, action: e.target.value }))}><option value="BUY">BUY</option><option value="SELL">SELL</option></select></div>
