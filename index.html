@@ -15,33 +15,16 @@
 const { useState, useEffect, useCallback } = React;
 
 const YF_BASE = "https://query1.finance.yahoo.com/v8/finance/chart/";
-const PROXIES = [
-  (url) => `https://corsproxy.io/?${encodeURIComponent(url)}`,
-  (url) => `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`,
-  (url) => `https://thingproxy.freeboard.io/fetch/${url}`,
-];
-
 async function fetchYahooWithFallback(ticker, interval, range) {
-  const url = `${YF_BASE}${ticker}?interval=${interval}&range=${range}`;
-  let lastError;
-  for (const proxyFn of PROXIES) {
-    try {
-      const res = await fetch(proxyFn(url), { signal: AbortSignal.timeout(8000) });
-      if (!res.ok) continue;
-      const raw = await res.text();
-      let data;
-      try {
-        const parsed = JSON.parse(raw);
-        data = parsed.contents ? JSON.parse(parsed.contents) : parsed;
-      } catch { continue; }
-      const result = data?.chart?.result?.[0];
-      if (!result) continue;
-      const closes = result.indicators.quote[0].close.filter(Boolean);
-      if (!closes.length) continue;
-      return { closes, lastPrice: closes[closes.length - 1] };
-    } catch (e) { lastError = e; }
-  }
-  throw lastError || new Error("All proxies failed");
+  const res = await fetch(`/api/quote?ticker=${ticker}&interval=${interval}&range=${range}`, 
+    { signal: AbortSignal.timeout(10000) });
+  if (!res.ok) throw new Error("API error");
+  const data = await res.json();
+  const result = data?.chart?.result?.[0];
+  if (!result) throw new Error("No data");
+  const closes = result.indicators.quote[0].close.filter(Boolean);
+  if (!closes.length) throw new Error("No closes");
+  return { closes, lastPrice: closes[closes.length - 1] };
 }
 
 const INITIAL_POSITIONS = [
