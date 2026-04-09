@@ -299,8 +299,13 @@ function App() {
   const exportJSON = () => {
     const data = { exportedAt: new Date().toISOString(), positions, watchlist, transactions, manualPrices, companyInfo };
     const json = JSON.stringify(data, null, 2);
-    setExportText(json); setShowExportModal(true);
-    navigator.clipboard.writeText(json).catch(() => {});
+    const blob = new Blob([json], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `portfolio_${new Date().toISOString().slice(0,10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
   };
   const copyExport = () => { navigator.clipboard.writeText(exportText).catch(() => {}); setCopyLabel("✓ COPIADO"); setTimeout(() => setCopyLabel("📋 COPIAR"), 2000); };
   const importJSON = () => {
