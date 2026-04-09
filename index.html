@@ -597,45 +597,45 @@ function App() {
               const pd = priceData[w.ticker];
               const info = companyInfo[w.ticker];
               const hasNote = w.nota && w.nota.trim().length > 0;
-              const pe = info?.pe;
+              const pfcf = info?.pfcf;
+              const evEbitda = info?.evEbitda;
               return (
-                <div key={w.id} className="wcard" style={{ background: "#0c1624", border: "1px solid #1a2535", borderRadius: 7, padding: "10px 12px", position: "relative", cursor: "pointer" }}
+                <div key={w.id} className="wcard" style={{ background: "#0c1624", border: "1px solid #1a2535", borderRadius: 6, padding: "7px 10px", position: "relative", cursor: "pointer" }}
                   onClick={() => openTV(w.ticker)}>
-                  <div style={{ position: "absolute", top: 7, right: 7, display: "flex", gap: 3 }}>
-                    <button style={{ ...s.btn(hasNote ? "#f0c040" : "#334"), padding: "1px 4px", fontSize: 9, zIndex: 2 }}
+                  <div style={{ position: "absolute", top: 5, right: 5, display: "flex", gap: 2 }}>
+                    <button style={{ ...s.btn(hasNote ? "#f0c040" : "#334"), padding: "1px 3px", fontSize: 8, zIndex: 2 }}
                       onClick={e => { e.stopPropagation(); setNoteModal({ ticker: w.ticker, type: "watchlist", id: w.id, note: w.nota || "" }); }}>📝</button>
-                    <button style={{ ...s.btn("#ff4d6d"), padding: "1px 4px", fontSize: 9, zIndex: 2 }}
+                    <button style={{ ...s.btn("#ff4d6d"), padding: "1px 3px", fontSize: 8, zIndex: 2 }}
                       onClick={e => { e.stopPropagation(); removeWatch(w.id); }}>✕</button>
                   </div>
 
-                  <div style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: 1, paddingRight: 48 }}>
-                    <span style={{ fontWeight: 700, fontSize: 13, color: "#e0ecf8" }}>{w.ticker}</span>
+                  <div style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 1, paddingRight: 44 }}>
+                    <span style={{ fontWeight: 700, fontSize: 12, color: "#e0ecf8" }}>{w.ticker}</span>
                   </div>
-                  {/* Type selector dropdown */}
-                  <div style={{ marginBottom: 4 }} onClick={e => e.stopPropagation()}>
-                    <select
-                      value={w.type}
+                  <div style={{ marginBottom: 2 }} onClick={e => e.stopPropagation()}>
+                    <select value={w.type}
                       onChange={e => setWatchlist(ws => ws.map(x => x.id === w.id ? { ...x, type: e.target.value } : x))}
-                      style={{ background: typeColor(w.type) + "22", border: `1px solid ${typeColor(w.type)}44`, borderRadius: 3, color: typeColor(w.type), fontSize: 9, fontFamily: ff, fontWeight: 700, letterSpacing: 1, padding: "2px 5px", cursor: "pointer" }}>
+                      style={{ background: typeColor(w.type) + "22", border: `1px solid ${typeColor(w.type)}44`, borderRadius: 3, color: typeColor(w.type), fontSize: 8, fontFamily: ff, fontWeight: 700, letterSpacing: 1, padding: "1px 4px", cursor: "pointer" }}>
                       <option value="observación">OBSERVACIÓN</option>
                       <option value="swing">SWING</option>
                       <option value="largo">LARGO</option>
                     </select>
                   </div>
-                  {info?.name && <div style={{ fontSize: 10, color: "#6a8aaa", marginBottom: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{info.name}</div>}
-                  {(info?.sector || info?.industry) && <div style={{ fontSize: 9, color: "#445", marginBottom: 6, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{info.sector}{info.sector && info.industry ? " · " : ""}{info.industry}</div>}
+                  {info?.name && <div style={{ fontSize: 9, color: "#6a8aaa", marginBottom: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{info.name}</div>}
+                  {(info?.sector || info?.industry) && <div style={{ fontSize: 8, color: "#445", marginBottom: 4, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{info.sector}{info.sector && info.industry ? " · " : ""}{info.industry}</div>}
 
-                  <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginBottom: 6 }}>
-                    <span style={{ fontSize: 16, fontWeight: 700, color: "#c8d6e5" }}>
-                      {loading[w.ticker] ? <span style={{ color: "#334", fontSize: 10 }}>…</span> : pd?.error ? <span style={{ color: "#ff4d6d", fontSize: 9 }}>sin datos</span> : pd?.price ? `$${fmt(pd.price)}` : "—"}
+                  <div style={{ display: "flex", alignItems: "baseline", gap: 5, marginBottom: 4 }}>
+                    <span style={{ fontSize: 14, fontWeight: 700, color: "#c8d6e5" }}>
+                      {loading[w.ticker] ? <span style={{ color: "#334", fontSize: 9 }}>…</span> : pd?.error ? <span style={{ color: "#ff4d6d", fontSize: 8 }}>sin datos</span> : pd?.price ? `$${fmt(pd.price)}` : "—"}
                     </span>
-                    {pd?.dayChange != null && <span style={{ fontSize: 11, fontWeight: 700, color: clr(pd.dayChange) }}>{pd.dayChange >= 0 ? "+" : ""}{fmt(pd.dayChange, 2)}%</span>}
+                    {pd?.dayChange != null && <span style={{ fontSize: 10, fontWeight: 700, color: clr(pd.dayChange) }}>{pd.dayChange >= 0 ? "+" : ""}{fmt(pd.dayChange, 2)}%</span>}
                   </div>
 
-                  <div style={{ display: "flex", gap: 10 }}>
-                    {pe != null && <div><div style={{ fontSize: 8, color: "#445", letterSpacing: 1 }}>P/E</div><div style={{ fontSize: 11, fontWeight: 700, color: pe > 40 ? "#f0c040" : pe > 0 ? "#00e5a0" : "#ff4d6d" }}>{fmt(pe, 1)}x</div></div>}
-                    {pd?.rsiD != null && <div><div style={{ fontSize: 8, color: "#445", letterSpacing: 1 }}>RSI D</div><div style={{ fontSize: 11, fontWeight: 700, color: pd.rsiD < 35 ? "#00e5a0" : pd.rsiD > 65 ? "#ff4d6d" : "#f0c040" }}>{fmt(pd.rsiD, 1)}</div></div>}
-                    {pd?.rsiW != null && <div><div style={{ fontSize: 8, color: "#445", letterSpacing: 1 }}>RSI W</div><div style={{ fontSize: 11, fontWeight: 700, color: pd.rsiW < 35 ? "#00e5a0" : pd.rsiW > 65 ? "#ff4d6d" : "#f0c040" }}>{fmt(pd.rsiW, 1)}</div></div>}
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    {pd?.rsiD != null && <div><div style={{ fontSize: 7, color: "#445", letterSpacing: 1 }}>RSI D</div><div style={{ fontSize: 10, fontWeight: 700, color: pd.rsiD < 35 ? "#00e5a0" : pd.rsiD > 65 ? "#ff4d6d" : "#f0c040" }}>{fmt(pd.rsiD, 1)}</div></div>}
+                    {pd?.rsiW != null && <div><div style={{ fontSize: 7, color: "#445", letterSpacing: 1 }}>RSI W</div><div style={{ fontSize: 10, fontWeight: 700, color: pd.rsiW < 35 ? "#00e5a0" : pd.rsiW > 65 ? "#ff4d6d" : "#f0c040" }}>{fmt(pd.rsiW, 1)}</div></div>}
+                    {pfcf != null && <div><div style={{ fontSize: 7, color: "#445", letterSpacing: 1 }}>P/FCF</div><div style={{ fontSize: 10, fontWeight: 700, color: pfcf < 15 ? "#00e5a0" : pfcf < 30 ? "#f0c040" : "#ff4d6d" }}>{fmt(pfcf, 1)}x</div></div>}
+                    {evEbitda != null && <div><div style={{ fontSize: 7, color: "#445", letterSpacing: 1 }}>EV/EBITDA</div><div style={{ fontSize: 10, fontWeight: 700, color: evEbitda < 10 ? "#00e5a0" : evEbitda < 20 ? "#f0c040" : "#ff4d6d" }}>{fmt(evEbitda, 1)}x</div></div>}
                   </div>
 
                   {w.tesis && <div style={{ fontSize: 10, color: "#556", borderTop: "1px solid #1a2535", paddingTop: 5, marginTop: 6, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{w.tesis}</div>}
